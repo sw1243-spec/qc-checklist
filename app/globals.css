@@ -1,26 +1,407 @@
 @import "tailwindcss";
 
+/* ── iOS design system ───────────────────────────
+   SF Pro · Liquid Glass · Apple HIG
+─────────────────────────────────────────────── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ── Backgrounds ────────────────────────────── */
+  --bg:    #e8d8c8;
+  --panel: #e0ccb8;
+  --card:  #f5ede2;
+
+  /* ── Borders ────────────────────────────────── */
+  --border:       rgba(0, 0, 0, 0.10);
+  --border-inner: rgba(0, 0, 0, 0.07);
+
+  /* ── Text ───────────────────────────────────── */
+  --text-1: #1c1917;
+  --text-2: #57534e;
+  --text-3: #a8a29e;
+
+  /* ── Accent (orange) ────────────────────────── */
+  --accent:  #d97753;
+
+  /* ── System Colors ──────────────────────────── */
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --danger:  #ff3b30;
+
+  /* ── Liquid Glass ───────────────────────────── */
+  --glass-bg:     rgba(255, 255, 255, 0.65);
+  --glass-blur:   blur(24px) saturate(180%);
+  --glass-border: rgba(255, 255, 255, 0.50);
+  --glass-shadow: 0 8px 40px rgba(0, 0, 0, 0.12);
+
+  /* ── LoginCard / ds-* aliases (LoginCard.tsx에서 사용) ── */
+  --ds-card:        var(--card);
+  --ds-line:        var(--border);
+  --ds-shadow-soft:
+    0 3px 10px rgba(0, 0, 0, 0.06),
+    0 18px 44px rgba(0, 0, 0, 0.10),
+    0 42px 96px rgba(0, 0, 0, 0.13);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+html { -webkit-text-size-adjust: 100%; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text-1);
+  line-height: 1.5;
+  letter-spacing: -0.2px;
+  -webkit-font-smoothing: antialiased;
 }
+
+/* ── Ambient glow (layout.tsx에서 사용) ─────────── */
+.ambient-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.glow-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+}
+.glow-1 {
+  width: 900px; height: 900px;
+  background: radial-gradient(circle, rgba(210, 140, 90, 0.45), transparent 65%);
+  top: -200px; left: -160px;
+}
+.glow-2 {
+  width: 800px; height: 800px;
+  background: radial-gradient(circle, rgba(200, 150, 90, 0.40), transparent 65%);
+  bottom: -160px; right: -160px;
+}
+.glow-3 {
+  width: 700px; height: 700px;
+  background: radial-gradient(circle, rgba(225, 185, 120, 0.30), transparent 65%);
+  top: 25%; left: 25%;
+}
+
+/* ── Card: iOS Grouped Cell ─────────────────────── */
+.glass {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 20px rgba(0, 0, 0, 0.04);
+  position: relative;
+  z-index: 1;
+}
+
+a.glass {
+  text-decoration: none;
+  transition: box-shadow 0.2s ease, transform 0.2s ease, opacity 0.15s ease;
+}
+a.glass:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 12px 36px rgba(0, 0, 0, 0.07);
+  transform: translateY(-1px);
+}
+a.glass:active {
+  transform: scale(0.97);
+  opacity: 0.88;
+}
+
+/* ── Liquid Glass ────────────────────────────────── */
+.liquid-glass {
+  background: rgba(255, 252, 246, 0.62);
+  -webkit-backdrop-filter: blur(16px) saturate(110%);
+  backdrop-filter: blur(16px) saturate(110%);
+  border: none;
+  border-radius: 20px;
+  box-shadow:
+    0 1px 3px rgba(180, 130, 90, 0.06),
+    0 4px 12px rgba(170, 120, 80, 0.08),
+    0 12px 32px rgba(160, 110, 70, 0.10),
+    0 28px 60px rgba(150, 100, 60, 0.08);
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+}
+
+a.liquid-glass {
+  text-decoration: none;
+  transition: box-shadow 0.2s ease, transform 0.2s ease, opacity 0.15s ease;
+}
+a.liquid-glass:hover {
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.13), 0 4px 12px rgba(0, 0, 0, 0.07);
+  transform: translateY(-1px);
+}
+a.liquid-glass:active {
+  transform: scale(0.97);
+  opacity: 0.88;
+}
+
+/* ── iOS section label (above card) ─────────────── */
+.ios-section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 6px;
+  margin-bottom: 6px;
+  margin-top: 20px;
+}
+
+/* Section card (checklist / results table) */
+.section-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+/* ── Animations ─────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up   { animation: fadeUp 0.3s cubic-bezier(0.25, 0.1, 0.25, 1) both; }
+.fade-up-1 { animation-delay: 0.05s; }
+.fade-up-2 { animation-delay: 0.10s; }
+.fade-up-3 { animation-delay: 0.16s; }
+.fade-up-4 { animation-delay: 0.22s; }
+.fade-up-5 { animation-delay: 0.28s; }
+
+/* ── Page wrapper ───────────────────────────────── */
+.page-wrap {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Typography: label-caps ──────────────────────── */
+.label-caps {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  line-height: 1;
+}
+
+/* ── Buttons ────────────────────────────────────── */
+
+/* Primary — iOS blue tinted pill */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 15px 28px;
+  background: var(--accent);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.12s ease;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  position: relative;
+  z-index: 10;
+}
+.btn-primary:hover  { opacity: 0.88; }
+.btn-primary:active { transform: scale(0.97); opacity: 0.82; }
+.btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* Secondary — iOS outlined pill */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 15px 28px;
+  background: rgba(217, 119, 87, 0.08);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.4px;
+  border: 1px solid rgba(217, 119, 87, 0.20);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-secondary:hover  { background: rgba(217, 119, 87, 0.13); }
+.btn-secondary:active { transform: scale(0.97); }
+
+/* Danger */
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 15px 28px;
+  background: var(--danger);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-danger:hover  { opacity: 0.88; }
+.btn-danger:active { transform: scale(0.97); }
+
+/* ── Input: iOS text field ──────────────────────── */
+.apple-input {
+  width: 100%;
+  padding: 13px 16px;
+  font-size: 17px;
+  font-family: inherit;
+  letter-spacing: -0.4px;
+  color: var(--text-1);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  -webkit-appearance: none;
+}
+.apple-input:focus {
+  background: var(--card);
+  border-color: #aaa;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+}
+.apple-input::placeholder { color: var(--text-3); }
+
+/* ── Label ─────────────────────────────────────── */
+.apple-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-bottom: 6px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ── Breadcrumb ─────────────────────────────────── */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.breadcrumb a { color: var(--accent); text-decoration: none; font-weight: 500; white-space: nowrap; }
+.breadcrumb a:hover { opacity: 0.75; }
+.breadcrumb-sep { color: var(--text-1); opacity: 0.5; font-size: 12px; }
+.breadcrumb span { white-space: nowrap; }
+
+/* ── Status pill ─────────────────────────────────── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.status-pill.ok {
+  background: rgba(52, 199, 89, 0.12);
+  color: #1a8f3e;
+  border: 1px solid rgba(52, 199, 89, 0.20);
+}
+.status-pill.warn {
+  background: rgba(255, 59, 48, 0.08);
+  color: var(--danger);
+  border: 1px solid rgba(255, 59, 48, 0.15);
+}
+
+/* Status dot */
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.ok   { background: var(--success); }
+.status-dot.warn { background: var(--danger); }
+
+/* ── OOR badge ──────────────────────────────────── */
+.oor-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(255, 59, 48, 0.08);
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 59, 48, 0.15);
+}
+
+/* ── Responsive layout helpers ──────────────────── */
+.meta-grid-2col {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll > * {
+  min-width: 480px;
+}
+
+/* Shift divider */
+.shift-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0 12px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.shift-divider::before,
+.shift-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+@media (max-width: 600px) {
+  .meta-grid-2col { grid-template-columns: 1fr; }
+  .page-wrap { padding: 24px 16px; justify-content: flex-start; padding-top: 48px; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.12); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.22); }

@@ -1,0 +1,246 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlserver"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id    Int    @id @default(autoincrement())
+  code  String @unique // "VW", "STELLANTIS"
+  name  String
+  lines Line[]
+}
+
+model Line {
+  id          Int      @id @default(autoincrement())
+  companyId   Int
+  code        String   // "A","B","C" / "1"~"6"
+  company     Company  @relation(fields: [companyId], references: [id])
+  models      Model[]
+  specRanges  SpecRange[]
+  submissions Submission[]
+  workers     Worker[]
+
+  @@unique([companyId, code])
+}
+
+model Model {
+  id            Int             @id @default(autoincrement())
+  lineId        Int
+  name          String          // "Atlas","Taos","Tiguan","RU","WS"...
+  line          Line            @relation(fields: [lineId], references: [id])
+  templateLinks TemplateModel[]
+  submissions   Submission[]
+  specRanges    SpecRange[]
+  partNumbers   PartNumber[]
+}
+
+model PartNumber {
+  id            Int                   @id @default(autoincrement())
+  modelId       Int
+  templateId    Int?                  // 기존 단일 템플릿 (Deprecated, fallback용)
+  code          String                // "203.B", "271.N"
+  label         String?               // "3QF.501.203.B / 204.B"
+  model         Model                 @relation(fields: [modelId], references: [id])
+  template      ChecksheetTemplate?   @relation(fields: [templateId], references: [id])
+  templateLinks PartNumberTemplate[]
+  specRanges    SpecRange[]
+  submissions   Submission[]
+
+  @@unique([modelId, code])
+}
+
+// PartNumber × ChecksheetTemplate 다대다 (Daily / Machine 등 여러 체크시트 지원)
+model PartNumberTemplate {
+  partNumberId Int
+  templateId   Int
+  partNumber   PartNumber          @relation(fields: [partNumberId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  template     ChecksheetTemplate  @relation(fields: [templateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([partNumberId, templateId])
+}
+
+model ChecksheetTemplate {
+  id           Int             @id @default(autoincrement())
+  code         String          @unique // "19-020"
+  name         String
+  version      String          // "Rev R"
+  sampleCount  Int             @default(2)
+  sampleLabels String          @default("P#1,P#2")
+  sortOrder    Int             @default(0) // 표시 순서 (드래그로 조정)
+  note         String?         // 관리자 주의사항 메모 (폼 헤더에 표시)
+  items            CheckItem[]
+  modelLinks       TemplateModel[]
+  partNumbers      PartNumber[]
+  partNumberLinks  PartNumberTemplate[]
+  submissions      Submission[]
+  chartTemplate    ChartTemplate?
+}
+
+model TemplateModel {
+  templateId Int
+  modelId    Int
+  template   ChecksheetTemplate @relation(fields: [templateId], references: [id])
+  model      Model              @relation(fields: [modelId], references: [id])
+
+  @@id([templateId, modelId])
+}
+
+model CheckItem {
+  id             Int                @id @default(autoincrement())
+  templateId     Int
+  section        String             // "MACHINE CHECK" | "ERROR PROOF"
+  opNo           String?            // "OP #10"
+  no             Int
+  characteristic String
+  method         String?
+  sample         String?
+  inputType      String             // "number" | "ok_ng" | "text"
+  unit           String?
+  nullable       Boolean            @default(false)
+  department     String?            // "QC" | "PROD" | null(공통) — 부서별 입력 분담
+  template       ChecksheetTemplate @relation(fields: [templateId], references: [id])
+  specRanges     SpecRange[]
+  values         CheckValue[]
+  chartMetric    ChartMetric?
+}
+
+// 라인/모델/파트넘버별 허용 범위. 모두 NULL이면 전체 공통
+model SpecRange {
+  id            Int         @id @default(autoincrement())
+  itemId        Int
+  lineId        Int?
+  modelId       Int?
+  partNumberId  Int?
+  minVal        Float?
+  maxVal        Float?
+  label         String?     // 화면 표시용 텍스트
+  item          CheckItem   @relation(fields: [itemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  line          Line?       @relation(fields: [lineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  model         Model?      @relation(fields: [modelId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  partNumber    PartNumber? @relation(fields: [partNumberId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model Submission {
+  id              Int                @id @default(autoincrement())
+  templateId      Int
+  lineId          Int                @map("line")
+  modelId         Int?               @map("model")
+  modelName       String?            // 스냅샷
+  companyName     String?            // 스냅샷
+  lineName        String?            // 스냅샷
+  templateCode    String?            // 스냅샷
+  templateName    String?            // 스냅샷
+  templateVersion String?            // 스냅샷
+  partNumberId    Int?
+  date            DateTime
+  shift1LE        String?
+  shift2LE        String?
+  shift1QC        String?
+  shift2QC        String?
+  shift1SV        String?
+  shift2SV        String?
+  partNumberBuild String?
+  hasOutOfRange   Boolean            @default(false)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @default(now()) @updatedAt
+  template        ChecksheetTemplate @relation(fields: [templateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  line            Line               @relation(fields: [lineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  model           Model?             @relation(fields: [modelId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  partNumber      PartNumber?        @relation(fields: [partNumberId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  values           CheckValue[]
+  correctiveAction CorrectiveAction?
+  logs             SubmissionLog[]
+
+  // 같은 (체크시트+파트넘버+라인+모델+날짜) 조합에 중복 제출 방지 (이중 안전장치)
+  @@unique([templateId, lineId, modelId, date, partNumberId])
+}
+
+model Worker {
+  id     Int    @id @default(autoincrement())
+  name   String
+  role   String // "LE" | "QC" | "SV"
+  lineId Int?
+  shift  Int?   // 1 | 2 | null(전체)
+  line   Line?  @relation(fields: [lineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model SubmissionLog {
+  id           Int        @id @default(autoincrement())
+  submissionId Int
+  shift        Int        // 어느 shift가 수정됐는지
+  editedAt     DateTime   @default(now())
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model CorrectiveAction {
+  id           Int        @id @default(autoincrement())
+  submissionId Int        @unique
+  cause        String?    // 원인
+  action       String?    // 조치 내용
+  resolvedBy   String?    // 처리자
+  createdAt    DateTime   @default(now())
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  photos       Attachment[]
+}
+
+model Attachment {
+  id                 Int              @id @default(autoincrement())
+  correctiveActionId Int
+  filename           String           // 디스크에 저장된 파일명 (UUID 등)
+  originalName       String           // 원본 파일명
+  mimeType           String
+  size               Int              // 바이트
+  caption            String?          // 설명
+  createdAt          DateTime         @default(now())
+  correctiveAction   CorrectiveAction @relation(fields: [correctiveActionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([correctiveActionId])
+}
+
+// 모든 주요 변경 이력 추적
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  action     String   // "SUBMIT" | "EDIT_SUBMISSION" | "CORRECTIVE_ACTION" | "CREATE" | "DELETE" | "LOGIN" | ...
+  entityType String   // "Submission" | "Company" | "Line" | "Model" | "Template" | "Worker" | ...
+  entityId   Int?
+  actor      String?  // 사용자 식별 (현재는 "user" / "admin")
+  detail     String?  // JSON 또는 텍스트 상세
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
+
+// ── Trend Chart 설정 (코드 하드코딩 대신 관리자에서 지정) ──
+
+// 어떤 체크시트를 Trend Chart 에 포함할지
+model ChartTemplate {
+  templateId Int                @id
+  template   ChecksheetTemplate @relation(fields: [templateId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+// 항목(숫자)을 차트의 어떤 측정값으로 볼지 + 단위
+model ChartMetric {
+  itemId Int       @id
+  metric String    // "ib" | "ob" | "weight"
+  unit   String?
+  item   CheckItem @relation(fields: [itemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+// shift(1|2) × partNo(1|2) = 4 rows per item per submission
+model CheckValue {
+  id           Int        @id @default(autoincrement())
+  submissionId Int
+  itemId       Int
+  shift        Int
+  partNo       Int
+  valueText     String?
+  isOutOfRange  Boolean    @default(false)
+  correctedText String?    // 조치 후 재측정값
+  submission    Submission @relation(fields: [submissionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  item          CheckItem  @relation(fields: [itemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}

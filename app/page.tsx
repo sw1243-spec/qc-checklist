@@ -1,65 +1,135 @@
-import Image from "next/image";
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { isAuthenticated } from "@/lib/auth";
+import { getBranding } from "@/lib/config";
+import { logoutAction } from "@/app/actions";
+import { prisma } from "@/lib/db";
 
-export default function Home() {
+export default async function HomePage() {
+  if (!(await isAuthenticated())) redirect("/login");
+
+  const branding = getBranding();
+  const [unresolvedOorCount, companies] = await Promise.all([
+    prisma.submission.count({ where: { hasOutOfRange: true, correctiveAction: null } }),
+    prisma.company.findMany({ orderBy: { name: "asc" } }),
+  ]);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="page-wrap">
+      <div style={{ width: "100%", maxWidth: "380px" }}>
+
+        {/* Large Title */}
+        <div className="fade-up" style={{ marginBottom: "32px" }}>
+          <p className="label-caps" style={{ marginBottom: "12px" }}>{branding.brandLabel}</p>
+          <h1 style={{
+            fontSize: "34px", fontWeight: "700",
+            letterSpacing: "0.4px", lineHeight: "1.1",
+            color: "var(--text-1)", marginBottom: "10px",
+          }}>
+            {branding.appTitle}
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p style={{ fontSize: "15px", color: "var(--text-2)", letterSpacing: "-0.2px" }}>
+            {branding.homeSubtitle}
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+        {/* OOR Alert Banner */}
+        {unresolvedOorCount > 0 && (
+          <Link
+            href="/history?oor=unhandled"
+            className="fade-up"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "14px 16px", marginBottom: "20px",
+              background: "rgba(255,59,48,0.08)",
+              border: "1px solid rgba(255,59,48,0.25)",
+              borderRadius: "14px",
+              textDecoration: "none",
+              animationDelay: "0.05s",
+            }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div style={{
+                width: "32px", height: "32px", borderRadius: "50%",
+                background: "rgba(255,59,48,0.15)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <div>
+                <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--danger)", letterSpacing: "-0.01em" }}>
+                  {unresolvedOorCount} Unresolved OOR
+                </div>
+                <div style={{ fontSize: "12px", color: "var(--text-2)", marginTop: "2px" }}>
+                  Click to view and take action
+                </div>
+              </div>
+            </div>
+            <svg width="8" height="13" viewBox="0 0 8 13" fill="none">
+              <path d="M1 1l6 5.5L1 12" stroke="var(--danger)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </Link>
+        )}
+
+        {/* Inset Grouped List */}
+        <div className="fade-up fade-up-1 liquid-glass" style={{
+          borderRadius: "16px", overflow: "hidden",
+          marginBottom: "32px",
+        }}>
+          {companies.map((c, i) => (
+            <Link key={c.code} href={`/company/${c.code}`} style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "15px 16px",
+              background: "transparent",
+              textDecoration: "none",
+              borderBottom: i < companies.length - 1 ? "1px solid rgba(255,255,255,0.25)" : "none",
+              transition: "opacity 0.15s ease",
+            }}>
+              <div style={{ fontSize: "17px", fontWeight: "600", letterSpacing: "-0.3px", color: "var(--text-1)" }}>
+                {c.name}
+              </div>
+              <svg width="8" height="13" viewBox="0 0 8 13" fill="none">
+                <path d="M1 1l6 5.5L1 12" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </Link>
+          ))}
         </div>
-      </main>
+
+        {/* History + Sign out */}
+        <div className="fade-up fade-up-2" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "16px" }}>
+            <Link href="/dashboard" style={{ fontSize: "15px", color: "var(--accent)", textDecoration: "none", letterSpacing: "-0.2px" }}>
+              Dashboard
+            </Link>
+            <Link href="/production" style={{ fontSize: "15px", color: "var(--accent)", textDecoration: "none", letterSpacing: "-0.2px" }}>
+              Charts
+            </Link>
+            <Link href="/history" style={{ fontSize: "15px", color: "var(--accent)", textDecoration: "none", letterSpacing: "-0.2px" }}>
+              History
+            </Link>
+          </div>
+          <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+            <Link href="/device" style={{ fontSize: "15px", color: "var(--text-3)", textDecoration: "none", letterSpacing: "-0.2px" }}>
+              Device
+            </Link>
+            <form action={logoutAction}>
+              <button type="submit" style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: "15px", color: "var(--text-3)", fontFamily: "inherit",
+                letterSpacing: "-0.2px", padding: 0,
+              }}>
+                Sign out
+              </button>
+            </form>
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }

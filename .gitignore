@@ -39,3 +39,22 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# prisma
+/app/generated/prisma
+
+# local storage (passwords + uploaded photos = user data, not for git)
+/storage/config.json
+/storage/attachments/
+
+# config 데이터 스냅샷 (사업 데이터 — git 제외, 서버엔 별도 전달)
+config-export.json
+
+# scratch/migration helper scripts & backups (not for deploy)
+/_*.mjs
+/_backup_vw_*.json
+
+# AI 도구 부산물 (앱 아님 — 로그/상태)
+/.omo/
+/.omx/
+/.claude/

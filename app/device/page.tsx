@@ -1,0 +1,71 @@
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import Link from "next/link";
+import { isAuthenticated } from "@/lib/auth";
+import { setDeviceNameAction } from "@/app/actions";
+
+export default async function DevicePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ success?: string; error?: string }>;
+}) {
+  if (!(await isAuthenticated())) redirect("/login");
+  const { success, error } = await searchParams;
+  const currentDevice = (await cookies()).get("qc_device")?.value ?? "";
+
+  return (
+    <div className="page-wrap">
+      <div style={{ width: "100%", maxWidth: "400px" }}>
+
+        <div className="fade-up" style={{ marginBottom: "24px" }}>
+          <Link href="/" style={{
+            display: "inline-flex", alignItems: "center", gap: "5px",
+            color: "var(--accent)", textDecoration: "none",
+            fontSize: "15px", fontWeight: "400", letterSpacing: "-0.2px",
+          }}>
+            <svg width="9" height="15" viewBox="0 0 9 15" fill="none">
+              <path d="M7.5 1.5L1.5 7.5L7.5 13.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Home
+          </Link>
+        </div>
+
+        <div className="fade-up" style={{ marginBottom: "24px" }}>
+          <p className="label-caps" style={{ marginBottom: "10px" }}>This Device</p>
+          <h1 style={{ fontSize: "30px", fontWeight: "700", letterSpacing: "-0.028em", color: "var(--text-1)", lineHeight: "1.1" }}>
+            Device Name
+          </h1>
+          <p style={{ fontSize: "14px", color: "var(--text-2)", marginTop: "8px", letterSpacing: "-0.2px" }}>
+            Set a name for this tablet. It appears in the audit log with each action.
+          </p>
+        </div>
+
+        {success === "1" && (
+          <div className="fade-up" style={{ marginBottom: "16px", padding: "12px 16px", background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.2)", borderRadius: "10px" }}>
+            <p style={{ fontSize: "13px", color: "var(--success, #34C759)" }}>Saved on this device.</p>
+          </div>
+        )}
+        {error === "pw" && (
+          <div className="fade-up" style={{ marginBottom: "16px", padding: "12px 16px", background: "rgba(255,59,48,0.08)", border: "1px solid rgba(255,59,48,0.2)", borderRadius: "10px" }}>
+            <p style={{ fontSize: "13px", color: "var(--danger)" }}>Admin password is incorrect.</p>
+          </div>
+        )}
+
+        <form action={setDeviceNameAction} className="liquid-glass fade-up" style={{ padding: "24px 20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+          <div>
+            <label className="apple-label" style={{ display: "block", marginBottom: "6px" }}>Device Name</label>
+            <input type="text" name="deviceName" defaultValue={currentDevice} placeholder="e.g. Line 2 Tablet" className="apple-input" autoFocus />
+          </div>
+          <div>
+            <label className="apple-label" style={{ display: "block", marginBottom: "6px" }}>Admin Password</label>
+            <input type="password" name="adminPw" required placeholder="Required to change" className="apple-input" />
+          </div>
+          <button type="submit" className="btn-primary" style={{ marginTop: "4px" }}>
+            Save
+          </button>
+        </form>
+
+      </div>
+    </div>
+  );
+}
