@@ -2,6 +2,21 @@
 
 Internal QC checksheet web app for HANSAE MOBILITY - USA PONTIAC.
 
+> **📢 Public (anonymized) version**
+>
+> This is a sanitized copy of an internal production application. All
+> company-confidential information (customer names, part numbers,
+> engineering specs/tolerances, internal document codes, ERP schema docs,
+> internal server addresses) was identified and removed **using Claude**.
+> The features are identical to the version currently used on the
+> production floor — only the data has been replaced with arbitrary
+> demo values (`Customer A/B`, `Model X1`, `PN-B-001`, …).
+>
+> **공개용(익명화) 버전** — 이 저장소는 사내 운영 중인 앱의 공개용 사본입니다.
+> 회사 중요정보(고객사명·파트넘버·규격/공차·내부 문서코드·ERP 문서·내부 서버 주소)는
+> Claude를 이용해 식별·제거했습니다. 기능은 현재 현장에서 사용 중인 버전과 동일하며,
+> 데이터만 임의의 데모 값으로 대체되었습니다.
+
 기술 스택 구성(stack): **Next.js 16 (App Router) + Prisma 5 + SQL Server**
 
 ---
