@@ -10,7 +10,7 @@ type Model = { id: number; name: string; templates: T[]; partNumbers: PN[] };
 type Line = { id: number; code: string; models: Model[] };
 type Company = { id: number; code: string; name: string; lines: Line[] };
 
-export default function StructureView({ tree, allTemplates }: { tree: Company[]; allTemplates: T[] }) {
+export default function StructureView({ tree }: { tree: Company[] }) {
   const [view, setView] = useState<"diagram" | "list">("diagram");
 
   return (
@@ -41,7 +41,7 @@ export default function StructureView({ tree, allTemplates }: { tree: Company[];
           <StructureDiagram tree={tree} />
         </>
       ) : (
-        <StructureTree tree={tree} allTemplates={allTemplates} />
+        <StructureTree tree={tree} />
       )}
     </div>
   );

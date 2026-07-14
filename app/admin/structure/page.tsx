@@ -7,31 +7,28 @@ import StructureView from "./StructureView";
 export default async function StructurePage() {
   if (!(await isAdminAuthenticated())) redirect("/SWJ/login");
 
-  const [companies, templates] = await Promise.all([
-    prisma.company.findMany({
-      orderBy: { name: "asc" },
-      include: {
-        lines: {
-          orderBy: { code: "asc" },
-          include: {
-            models: {
-              orderBy: { name: "asc" },
-              include: {
-                templateLinks: { include: { template: true } },
-                partNumbers: {
-                  orderBy: { code: "asc" },
-                  include: { templateLinks: { include: { template: true } } },
-                },
+  const companies = await prisma.company.findMany({
+    orderBy: { name: "asc" },
+    include: {
+      lines: {
+        orderBy: { code: "asc" },
+        include: {
+          models: {
+            orderBy: { name: "asc" },
+            include: {
+              templateLinks: { include: { template: true } },
+              partNumbers: {
+                orderBy: { code: "asc" },
+                include: { templateLinks: { include: { template: true } } },
               },
             },
           },
         },
       },
-    }),
-    prisma.checksheetTemplate.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, name: true } }),
-  ]);
+    },
+  });
 
-  // 클라이언트로 넘길 직렬화 가능한 트리 데이터
+  // 클라이언트로 넘길 직렬화 가능한 트리 데이터 (templates 포함 — 다이어그램 표시용)
   const tree = companies.map((c) => ({
     id: c.id,
     code: c.code,
@@ -53,8 +50,6 @@ export default async function StructurePage() {
     })),
   }));
 
-  const allTemplates = templates.map((t) => ({ id: t.id, code: t.code, name: t.name }));
-
   return (
     <div style={{ maxWidth: "820px", margin: "0 auto", padding: "36px 16px 64px", position: "relative", zIndex: 1, minHeight: "100dvh" }}>
 
@@ -74,7 +69,7 @@ export default async function StructurePage() {
         </p>
       </div>
 
-      <StructureView tree={tree} allTemplates={allTemplates} />
+      <StructureView tree={tree} />
 
       <div style={{ marginTop: "32px" }}>
         <Link href="/SWJ" style={{ fontSize: "13px", color: "var(--text-3)", textDecoration: "none" }}>← Back</Link>

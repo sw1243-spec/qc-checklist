@@ -149,7 +149,7 @@ export default function CompanyManager({ companies }: { companies: Company[] }) 
                   {/* Add Model 폼 */}
                   {openModelForm === line.id && (
                     <InlineForm
-                      fields={[{ name: "name", placeholder: "Model name (e.g. Atlas)" }]}
+                      fields={[{ name: "name", placeholder: "Model name (e.g. Model X1)" }]}
                       action={(fd) => { fd.append("lineId", String(line.id)); return createModel(fd); }}
                       onDone={() => setOpenModelForm(null)}
                     />
@@ -211,7 +211,7 @@ export default function CompanyManager({ companies }: { companies: Company[] }) 
             <InlineForm
               fields={[
                 { name: "code", placeholder: "Code (e.g. VW)",  width: "120px" },
-                { name: "name", placeholder: "Full name (e.g. Volkswagen)" },
+                { name: "name", placeholder: "Full name (e.g. Customer A)" },
               ]}
               action={createCompany}
               onDone={() => setShowAddCompany(false)}

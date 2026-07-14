@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { logAudit } from "@/lib/audit";
 import { checkLockout, recordFail, clearAttempts } from "@/lib/loginLockout";
 import { sendSlackOorAlert } from "@/lib/notify";
+import { parseSubmissionDateInput } from "@/lib/dateRange";
 import { headers, cookies } from "next/headers";
 
 export async function loginAction(formData: FormData) {
@@ -141,10 +142,13 @@ export async function submitChecklist(
   meta: {
     shift1LE: string;
     shift2LE: string;
+    shift3LE: string;
     shift1QC: string;
     shift2QC: string;
+    shift3QC: string;
     shift1SV: string;
     shift2SV: string;
+    shift3SV: string;
     partNumberBuild: string;
     partNumberId?: number;
   },
@@ -152,6 +156,11 @@ export async function submitChecklist(
 ): Promise<SubmitResult> {
   await requireUser();
   const partNumberId = meta.partNumberId;
+
+  // 작업자 — 부서 분담 여부에 따라 필수 검증은 아래(items 조회 후)에서 처리
+  const le = shift === 1 ? meta.shift1LE : shift === 2 ? meta.shift2LE : meta.shift3LE;
+  const qc = shift === 1 ? meta.shift1QC : shift === 2 ? meta.shift2QC : meta.shift3QC;
+  const sv = shift === 1 ? meta.shift1SV : shift === 2 ? meta.shift2SV : meta.shift3SV;
 
   // 스냅샷용 데이터 조회
   const [modelRecord, lineRecord, templateRecord] = await Promise.all([
@@ -168,8 +177,8 @@ export async function submitChecklist(
     return { ok: false, error: "Invalid submission: model does not belong to line" };
   }
   // 템플릿-모델 연결 검증:
-  // 경로 A: TemplateModel (직접 연결, VW 등)
-  // 경로 B: PartNumber → PartNumberTemplate (파트넘버 경유, Stellantis 등)
+  // 경로 A: TemplateModel (직접 연결)
+  // 경로 B: PartNumber → PartNumberTemplate (파트넘버 경유)
   const templateLinkedDirect = await prisma.templateModel.findUnique({
     where: { templateId_modelId: { templateId, modelId } },
   });
@@ -199,6 +208,20 @@ export async function submitChecklist(
   const invalidItems = values.filter((v) => !validItemIds.has(v.itemId));
   if (invalidItems.length > 0) {
     return { ok: false, error: "Invalid submission: unknown itemId in values" };
+  }
+
+  // 이번 제출이 어느 부서 항목인지 — 부서별 독립 제출(병합) 판단
+  const submittedItemIds = [...new Set(values.map((v) => v.itemId))];
+  const submittedItems = items.filter((i) => submittedItemIds.includes(i.id));
+  const hasDeptItems = items.some((i) => i.department === "QC" || i.department === "PROD");
+  const isProdSubmit = hasDeptItems && submittedItems.length > 0 && submittedItems.every((i) => i.department === "PROD");
+
+  // 작업자 필수 검증 (부서별: Production→라인리더, Quality→QC 검사자 / 분담 없음→3명)
+  if (hasDeptItems) {
+    if (isProdSubmit && !le?.trim()) return { ok: false, error: "Line Leader is required." };
+    if (!isProdSubmit && !qc?.trim()) return { ok: false, error: "QC Inspector is required." };
+  } else if (!le?.trim() || !qc?.trim() || !sv?.trim()) {
+    return { ok: false, error: "Line Leader, QC Inspector, and QC Supervisor are all required before submitting." };
   }
 
   // 범위 계산 (partNumberId 우선)
@@ -231,7 +254,7 @@ export async function submitChecklist(
     return { ...v, isOutOfRange: outOfRange };
   });
 
-  const submissionDate = new Date(date);
+  const submissionDate = parseSubmissionDateInput(date);
   // 잘못된 날짜 문자열(Invalid Date)이 저장/조회되어 정합성이 깨지는 것 방지
   if (isNaN(submissionDate.getTime())) {
     return { ok: false, error: "Invalid submission date" };
@@ -258,14 +281,29 @@ export async function submitChecklist(
   let hasOutOfRange: boolean;
 
   if (existing) {
-    // 다른 shift 기존 값 + 이번 shift 새 값으로 hasOutOfRange 재계산 (DB 재조회 불필요)
-    const otherShiftOor = existing.values.some((v) => v.shift !== shift && v.isOutOfRange);
-    hasOutOfRange = otherShiftOor || checkedValues.some((v) => v.isOutOfRange);
+    // 병합: 이번에 제출한 항목만 교체하고 나머지(다른 부서/시프트) 값은 보존.
+    // hasOutOfRange = 보존되는 기존 OOR + 이번 새 값의 OOR
+    const preservedOor = existing.values.some((v) => {
+      const willReplace = v.shift === shift && submittedItemIds.includes(v.itemId);
+      return !willReplace && v.isOutOfRange;
+    });
+    hasOutOfRange = preservedOor || checkedValues.some((v) => v.isOutOfRange);
+
+    // 부서별 제출이면 해당 부서 작업자 필드만 갱신 (다른 부서가 채운 값 보존)
+    const workerData = hasDeptItems
+      ? (isProdSubmit
+          ? (shift === 1 ? { shift1LE: meta.shift1LE } : shift === 2 ? { shift2LE: meta.shift2LE } : { shift3LE: meta.shift3LE })
+          : (shift === 1 ? { shift1QC: meta.shift1QC } : shift === 2 ? { shift2QC: meta.shift2QC } : { shift3QC: meta.shift3QC }))
+      : (shift === 1
+          ? { shift1LE: meta.shift1LE, shift1QC: meta.shift1QC, shift1SV: meta.shift1SV }
+          : shift === 2
+          ? { shift2LE: meta.shift2LE, shift2QC: meta.shift2QC, shift2SV: meta.shift2SV }
+          : { shift3LE: meta.shift3LE, shift3QC: meta.shift3QC, shift3SV: meta.shift3SV });
 
     // 삭제 → 삽입 → 업데이트를 트랜잭션으로 묶어 중간 실패 시 데이터 손실 방지
     await prisma.$transaction([
       prisma.checkValue.deleteMany({
-        where: { submissionId: existing.id, shift },
+        where: { submissionId: existing.id, shift, itemId: { in: submittedItemIds } },
       }),
       prisma.checkValue.createMany({
         data: checkedValues.map((v) => ({
@@ -282,9 +320,7 @@ export async function submitChecklist(
         data: {
           hasOutOfRange,
           partNumberBuild: meta.partNumberBuild || existing.partNumberBuild,
-          ...(shift === 1
-            ? { shift1LE: meta.shift1LE, shift1QC: meta.shift1QC, shift1SV: meta.shift1SV }
-            : { shift2LE: meta.shift2LE, shift2QC: meta.shift2QC, shift2SV: meta.shift2SV }),
+          ...workerData,
         },
       }),
       prisma.submissionLog.create({ data: { submissionId: existing.id, shift } }),
@@ -316,6 +352,7 @@ export async function submitChecklist(
           templateVersion: templateRecord?.version ?? null,
           partNumberId: partNumberId ?? null,
           date: submissionDate,
+          shift,
           shift1LE: meta.shift1LE,
           shift2LE: meta.shift2LE,
           shift1QC: meta.shift1QC,
@@ -395,6 +432,36 @@ export async function submitChecklist(
       oorItems,
       baseUrl,
     });
+  }
+
+  // 머신체크의 GREASE TRACEABILITY 항목 → GreaseLog 'start' 기록으로 통합
+  // (Grease Change 화면·submission 타임라인에 한 줄로 이어짐. 재제출 시 갱신)
+  if (partNumberId) {
+    const greaseItems = items.filter((i) => i.section === "GREASE TRACEABILITY");
+    for (const gi of greaseItems) {
+      const ch = gi.characteristic.toLowerCase();
+      const side = ch.includes("outboard") ? "outboard" : ch.includes("inboard") ? "inboard" : null;
+      if (!side) continue;
+      const val = values.find((v) => v.itemId === gi.id && v.partNo === 1)?.valueText?.trim();
+      if (!val) continue;
+      const existing = await prisma.greaseLog.findFirst({
+        where: { partNumberId, date: submissionDate, side, source: "machine" },
+      });
+      if (existing) {
+        await prisma.greaseLog.update({ where: { id: existing.id }, data: { batchCode: val, operator: le } });
+      } else {
+        await prisma.greaseLog.create({
+          data: {
+            lineId, modelId, partNumberId,
+            companyName:    lineRecord?.company?.name ?? null,
+            lineName:       lineRecord?.code ?? null,
+            modelName:      modelRecord?.name ?? null,
+            partNumberCode: meta.partNumberBuild || null,
+            date: submissionDate, side, batchCode: val, operator: le, source: "machine",
+          },
+        });
+      }
+    }
   }
 
   return { ok: true, submissionId, hasOutOfRange };
@@ -516,6 +583,7 @@ export async function linkTemplateToModel(formData: FormData) {
   });
   const { revalidatePath } = await import("next/cache");
   revalidatePath(`/admin/models/${modelId}`);
+  revalidatePath("/company", "layout"); // 체크시트 선택 페이지 캐시 무효화
 }
 
 export async function unlinkTemplateFromModel(formData: FormData) {
@@ -526,12 +594,64 @@ export async function unlinkTemplateFromModel(formData: FormData) {
   await prisma.templateModel.deleteMany({ where: { templateId, modelId } });
   const { revalidatePath } = await import("next/cache");
   revalidatePath(`/admin/models/${modelId}`);
+  revalidatePath("/company", "layout"); // 체크시트 선택 페이지 캐시 무효화
+}
+
+// 파트넘버 레벨 링크 해제 — 해당 모델의 모든 PN에서 templateId 제거
+export async function unlinkTemplateFromPartNumbers(formData: FormData) {
+  await requireAdmin();
+  const modelId    = Number(formData.get("modelId"));
+  const templateId = Number(formData.get("templateId"));
+  if (!modelId || !templateId) return;
+  // 해당 모델 소속 PN id 목록
+  const pns = await prisma.partNumber.findMany({ where: { modelId }, select: { id: true } });
+  const pnIds = pns.map((p) => p.id);
+  if (pnIds.length) {
+    await prisma.partNumberTemplate.deleteMany({ where: { templateId, partNumberId: { in: pnIds } } });
+  }
+  const { revalidatePath } = await import("next/cache");
+  revalidatePath(`/admin/models/${modelId}`);
+  revalidatePath("/company", "layout");
+}
+
+// 여러 PN에 템플릿 연결 (한 번에)
+export async function linkTemplateToPartNumber(formData: FormData) {
+  await requireAdmin();
+  const templateId = Number(formData.get("templateId"));
+  const pnIds = formData.getAll("partNumberId").map((v) => Number(v)).filter((n) => Number.isFinite(n) && n > 0);
+  if (!templateId || pnIds.length === 0) return;
+  await prisma.$transaction(
+    pnIds.map((partNumberId) =>
+      prisma.partNumberTemplate.upsert({
+        where: { partNumberId_templateId: { partNumberId, templateId } },
+        create: { partNumberId, templateId },
+        update: {},
+      })
+    )
+  );
+  const pn = await prisma.partNumber.findFirst({ where: { id: pnIds[0] }, select: { modelId: true } });
+  const { revalidatePath } = await import("next/cache");
+  if (pn) revalidatePath(`/admin/models/${pn.modelId}`);
+  revalidatePath("/company", "layout");
+}
+
+// 특정 PN에서 템플릿 연결 해제
+export async function unlinkTemplateFromPartNumber(formData: FormData) {
+  await requireAdmin();
+  const partNumberId = Number(formData.get("partNumberId"));
+  const templateId   = Number(formData.get("templateId"));
+  if (!partNumberId || !templateId) return;
+  await prisma.partNumberTemplate.deleteMany({ where: { partNumberId, templateId } });
+  const pn = await prisma.partNumber.findUnique({ where: { id: partNumberId }, select: { modelId: true } });
+  const { revalidatePath } = await import("next/cache");
+  if (pn) revalidatePath(`/admin/models/${pn.modelId}`);
+  revalidatePath("/company", "layout");
 }
 
 export async function submitCorrectiveAction(formData: FormData) {
   await requireUser();
   const submissionId = Number(formData.get("submissionId"));
-  const cause      = (formData.get("cause")      as string).trim();
+  const cause      = ((formData.get("cause")      as string) ?? "").trim();
   const action     = (formData.get("action")     as string).trim();
   const resolvedBy = (formData.get("resolvedBy") as string).trim();
   if (!submissionId) return;
@@ -566,4 +686,60 @@ export async function submitCorrectiveAction(formData: FormData) {
 
   const { revalidatePath } = await import("next/cache");
   revalidatePath(`/submission/${submissionId}`);
+}
+
+/* ── Grease Traceability ─────────────────────────────── */
+
+// 그리스 교체 기록 추가 (라인 중간 컨테이너 교체 대응). 시각은 자동.
+export async function addGreaseLog(formData: FormData) {
+  await requireUser();
+  const lineId       = Number(formData.get("lineId"));
+  const modelId      = formData.get("modelId")      ? Number(formData.get("modelId"))      : null;
+  const partNumberId = formData.get("partNumberId") ? Number(formData.get("partNumberId")) : null;
+  const side         = String(formData.get("side") ?? "");
+  const batchCode    = String(formData.get("batchCode") ?? "").trim();
+  const operator     = String(formData.get("operator") ?? "").trim();
+  if (!lineId || !batchCode) return { error: "Line and batch code are required." };
+  if (!operator) return { error: "Operator is required." };
+  if (side !== "outboard" && side !== "inboard") return { error: "Invalid side." };
+
+  // 스냅샷 — 마스터 데이터가 나중에 바뀌어도 기록 보존
+  const [line, model, pn] = await Promise.all([
+    prisma.line.findUnique({ where: { id: lineId }, include: { company: true } }),
+    modelId      ? prisma.model.findUnique({ where: { id: modelId } })            : Promise.resolve(null),
+    partNumberId ? prisma.partNumber.findUnique({ where: { id: partNumberId } })  : Promise.resolve(null),
+  ]);
+
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+
+  await prisma.greaseLog.create({
+    data: {
+      lineId, modelId, partNumberId,
+      companyName:    line?.company?.name ?? null,
+      lineName:       line?.code ?? null,
+      modelName:      model?.name ?? null,
+      partNumberCode: pn?.code ?? null,
+      date, side, batchCode, operator,
+    },
+  });
+  await logAudit({
+    action: "GREASE_CHANGE", entityType: "GreaseLog",
+    detail: { lineId, modelId, partNumberId, side, batchCode, operator },
+  });
+
+  const { revalidatePath } = await import("next/cache");
+  revalidatePath("/grease");
+  return { ok: true };
+}
+
+// 그리스 교체 기록 삭제 (오입력 정정)
+export async function deleteGreaseLog(id: number) {
+  await requireUser();
+  if (!id) return { error: "Invalid id." };
+  await prisma.greaseLog.delete({ where: { id } });
+  await logAudit({ action: "GREASE_CHANGE_DELETE", entityType: "GreaseLog", entityId: id });
+  const { revalidatePath } = await import("next/cache");
+  revalidatePath("/grease");
+  return { ok: true };
 }

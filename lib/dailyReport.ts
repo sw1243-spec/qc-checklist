@@ -3,9 +3,8 @@ import { sendMail } from "@/lib/email";
 import { readConfig } from "@/lib/config";
 
 export async function generateDailyReportEmail(targetDate?: Date): Promise<{ subject: string; html: string }> {
-  // targetDate = 어제 기본
+  // targetDate 미지정 시 오늘 기준 — 시프트 종료 시각에 호출하면 그 시점까지의 오늘 제출분이 포함됨
   const d = targetDate ?? new Date();
-  if (!targetDate) d.setDate(d.getDate() - 1);
   const start = new Date(d); start.setHours(0, 0, 0, 0);
   const end   = new Date(d); end.setHours(23, 59, 59, 999);
 
@@ -121,7 +120,7 @@ export async function generateDailyReportEmail(targetDate?: Date): Promise<{ sub
           <div style="font-size:12px;color:#9b9b98;margin-top:2px">${time}${s.correctiveAction ? " · ✅ Resolved" : " · ⚠️ Unresolved"}</div>
         </div>`;
       }).join("")}
-    </div>` : `<div style="background:#fff;border-radius:14px;padding:20px;margin-top:16px;text-align:center;color:#34C759"><strong>✅ No OOR yesterday</strong></div>`}
+    </div>` : `<div style="background:#fff;border-radius:14px;padding:20px;margin-top:16px;text-align:center;color:#34C759"><strong>✅ No OOR today</strong></div>`}
 
     <div style="margin-top:24px;text-align:center;font-size:11px;color:#9b9b98">
       Automated report from QC Check Sheet System<br>Generated ${new Date().toLocaleString()}

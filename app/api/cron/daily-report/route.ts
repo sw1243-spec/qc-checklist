@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { sendDailyReport } from "@/lib/dailyReport";
 
-// 스케줄러용 일일 리포트 발송 엔드포인트
+// 스케줄러용 리포트 발송 엔드포인트 (오늘 제출분 기준)
 // 인증: Authorization: Bearer <CRON_TOKEN> 헤더 (URL query 사용 시 로그에 토큰 노출 위험)
-// Windows 작업 스케줄러에서 매일 아침 8시에 호출:
+// Windows 작업 스케줄러에서 각 시프트 종료 시각에 호출 (예: 1교대·2교대 종료):
 //   curl -s -H "Authorization: Bearer YOUR_TOKEN" "https://your-server/api/cron/daily-report"
 
 export async function GET(req: NextRequest) {

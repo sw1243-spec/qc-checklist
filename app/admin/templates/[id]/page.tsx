@@ -18,7 +18,7 @@ export default async function TemplateDetailPage({
       where: { id: Number(id) },
       include: {
         items: {
-          orderBy: [{ no: "asc" }, { id: "asc" }],
+          orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
           include: { specRanges: true },
         },
       },
@@ -51,7 +51,7 @@ export default async function TemplateDetailPage({
 
       <TemplateEditor
         templateId={template.id}
-        template={{ code: template.code, name: template.name, version: template.version, sampleCount: template.sampleCount, sampleLabels: template.sampleLabels, note: template.note ?? "" }}
+        template={{ code: template.code, name: template.name, version: template.version, sampleCount: template.sampleCount, sampleLabels: template.sampleLabels, note: template.note ?? "", responsible: template.responsible ?? "" }}
         items={template.items}
         partNumbers={partNumbers.map(p => ({
           id: p.id,

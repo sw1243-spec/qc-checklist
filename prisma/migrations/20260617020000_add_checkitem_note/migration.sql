@@ -1,0 +1,1 @@
+ALTER TABLE "CheckItem" ADD "note" NVARCHAR(MAX);

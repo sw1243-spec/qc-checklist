@@ -24,7 +24,7 @@ export default async function PartNumberPage({
   });
   if (!model || model.line.company.code !== company || model.line.id !== Number(lineId)) notFound();
 
-  // 파트넘버가 없으면 기존 템플릿 플로우로 (Stellantis 등)
+  // 파트넘버가 없으면 기존 템플릿 플로우로
   if (model.partNumbers.length === 0) {
     const tmplLink = await prisma.templateModel.findFirst({ where: { modelId: model.id } });
     if (!tmplLink) notFound();

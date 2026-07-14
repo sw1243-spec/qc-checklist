@@ -12,7 +12,7 @@ export default async function ShiftPage({
   const { company, lineId, modelId, partNumberId, templateId } = await params;
   if (!Number.isFinite(Number(partNumberId)) || !Number.isFinite(Number(templateId))) notFound();
 
-  const [partNumber, template] = await Promise.all([
+  const [partNumber, template, shifts] = await Promise.all([
     prisma.partNumber.findUnique({
       where: { id: Number(partNumberId) },
       include: {
@@ -20,6 +20,7 @@ export default async function ShiftPage({
       },
     }),
     prisma.checksheetTemplate.findUnique({ where: { id: Number(templateId) } }),
+    prisma.shiftConfig.findMany({ where: { isActive: true }, orderBy: { order: "asc" } }),
   ]);
   if (
     !partNumber ||
@@ -57,10 +58,10 @@ export default async function ShiftPage({
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "28px" }}>
-          {[1, 2].map((shift, i) => (
+          {(shifts.length > 0 ? shifts : [{ order: 1, name: "1st Shift" }, { order: 2, name: "2nd Shift" }]).map((shift, i) => (
             <Link
-              key={shift}
-              href={`${base}&shift=${shift}`}
+              key={shift.order}
+              href={`${base}&shift=${shift.order}`}
               className={`liquid-glass fade-up fade-up-${i + 1}`}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -69,7 +70,7 @@ export default async function ShiftPage({
             >
               <div>
                 <div style={{ fontSize: "16px", fontWeight: "700", letterSpacing: "-0.01em", color: "var(--text-1)" }}>
-                  {shift === 1 ? "1st Shift" : "2nd Shift"}
+                  {shift.name}
                 </div>
               </div>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

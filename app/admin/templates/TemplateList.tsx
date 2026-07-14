@@ -2,7 +2,7 @@
 
 import { useState, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { reorderTemplates } from "@/app/admin/actions";
+import { reorderTemplates, deleteTemplate, duplicateTemplate } from "@/app/admin/actions";
 
 type Tpl = { id: number; name: string; version: string; code: string; items: number };
 
@@ -10,6 +10,8 @@ export default function TemplateList({ initial }: { initial: Tpl[] }) {
   const router = useRouter();
   const [items, setItems] = useState(initial);
   const [, start] = useTransition();
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [copying, setCopying] = useState<number | null>(null);
   const dragId = useRef<number | null>(null);
   const [overId, setOverId] = useState<number | null>(null);
 
@@ -28,6 +30,30 @@ export default function TemplateList({ initial }: { initial: Tpl[] }) {
       await reorderTemplates(next.map((t) => t.id));
       router.refresh();
     });
+  }
+
+  async function handleCopy(t: Tpl) {
+    setCopying(t.id);
+    const result = await duplicateTemplate(t.id);
+    setCopying(null);
+    if (result?.error) {
+      alert(result.error);
+    } else {
+      router.refresh();
+    }
+  }
+
+  async function handleDelete(t: Tpl) {
+    if (!confirm(`"${t.name}" 템플릿을 삭제할까요?\n\n제출 기록이 있으면 삭제되지 않습니다.`)) return;
+    setDeleting(t.id);
+    const result = await deleteTemplate(t.id);
+    setDeleting(null);
+    if (result?.error) {
+      alert(result.error);
+    } else {
+      setItems((prev) => prev.filter((x) => x.id !== t.id));
+      router.refresh();
+    }
   }
 
   return (
@@ -64,6 +90,7 @@ export default function TemplateList({ initial }: { initial: Tpl[] }) {
                   fontSize: "10px", fontWeight: "600", padding: "2px 7px",
                   background: "var(--panel)", border: "1px solid var(--border)",
                   borderRadius: "999px", color: "var(--text-3)",
+                  whiteSpace: "nowrap", flexShrink: 0,
                 }}>{t.version}</span>
               </div>
               <div className="label-caps" style={{ marginTop: "4px", fontSize: "10px" }}>
@@ -74,6 +101,42 @@ export default function TemplateList({ initial }: { initial: Tpl[] }) {
               <polyline points="9 18 15 12 9 6"/>
             </svg>
           </a>
+
+          {/* 복제 버튼 */}
+          <button
+            onClick={(e) => { e.stopPropagation(); handleCopy(t); }}
+            disabled={copying === t.id}
+            title="Duplicate template"
+            style={{
+              flexShrink: 0,
+              padding: "6px 8px",
+              fontSize: "12px", fontWeight: "500",
+              background: "var(--panel)", color: "var(--text-2)",
+              border: "1px solid var(--border)", borderRadius: "8px",
+              cursor: "pointer", fontFamily: "inherit",
+              opacity: copying === t.id ? 0.5 : 1,
+            }}
+          >
+            {copying === t.id ? "…" : "Copy"}
+          </button>
+
+          {/* 삭제 버튼 */}
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
+            disabled={deleting === t.id}
+            title="Delete template"
+            style={{
+              flexShrink: 0,
+              padding: "6px 8px",
+              fontSize: "12px", fontWeight: "500",
+              background: "rgba(255,59,48,0.08)", color: "var(--danger)",
+              border: "1px solid rgba(255,59,48,0.18)", borderRadius: "8px",
+              cursor: "pointer", fontFamily: "inherit",
+              opacity: deleting === t.id ? 0.5 : 1,
+            }}
+          >
+            {deleting === t.id ? "…" : "Delete"}
+          </button>
         </div>
       ))}
     </div>

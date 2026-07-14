@@ -15,8 +15,13 @@ export default async function CheckSheetSelectPage({
   const partNumber = await prisma.partNumber.findUnique({
     where: { id: Number(partNumberId) },
     include: {
-      model: { include: { line: { include: { company: true } } } },
-      templateLinks: { include: { template: true } },
+      model: {
+        include: {
+          line: { include: { company: true } },
+          templateLinks: { include: { template: true } }, // 모델 레벨 링크
+        },
+      },
+      templateLinks: { include: { template: true } }, // 파트넘버 레벨 링크
       template: true, // legacy fallback
     },
   });
@@ -27,11 +32,22 @@ export default async function CheckSheetSelectPage({
     partNumber.modelId !== Number(modelId)
   ) notFound();
 
-  // 사용 가능한 체크시트 목록: 조인 테이블 우선, 없으면 legacy templateId
-  // 표시 순서는 admin에서 드래그로 정한 sortOrder를 따름
-  let templates = partNumber.templateLinks
-    .map((tl) => tl.template)
-    .sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
+  // 모델 레벨 링크 + 파트넘버 레벨 링크 합치기 (중복 제거)
+  const seen = new Set<number>();
+  const merged: typeof partNumber.templateLinks[0]["template"][] = [];
+  for (const tl of [
+    ...partNumber.model.templateLinks,
+    ...partNumber.templateLinks,
+  ]) {
+    if (!seen.has(tl.template.id)) {
+      seen.add(tl.template.id);
+      merged.push(tl.template);
+    }
+  }
+
+  let templates = merged.sort((a, b) => a.sortOrder - b.sortOrder || a.code.localeCompare(b.code));
+
+  // 아무 링크도 없으면 legacy templateId fallback
   if (templates.length === 0 && partNumber.template) {
     templates = [partNumber.template];
   }
@@ -85,8 +101,18 @@ export default async function CheckSheetSelectPage({
                 <div style={{ fontSize: "16px", fontWeight: "700", letterSpacing: "-0.01em", color: "var(--text-1)" }}>
                   {t.name}
                 </div>
-                <div className="label-caps" style={{ marginTop: "3px", fontSize: "10px", color: "var(--text-3)" }}>
-                  {t.code} · {t.version}
+                <div style={{ marginTop: "5px", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                  <span className="label-caps" style={{ fontSize: "10px", color: "var(--text-3)" }}>{t.code} · {t.version}</span>
+                  {t.responsible && t.responsible.split(",").filter(Boolean).map((p) => {
+                    const isQC = p === "QC";
+                    return (
+                      <span key={p} style={{
+                        fontSize: "9px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px",
+                        background: isQC ? "rgba(125,155,118,0.18)" : "rgba(107,140,174,0.18)",
+                        color: isQC ? "#5a7a52" : "#4a6a8e",
+                      }}>{isQC ? "Quality" : "Production"}</span>
+                    );
+                  })}
                 </div>
               </div>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

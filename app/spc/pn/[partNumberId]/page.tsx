@@ -21,7 +21,7 @@ export default async function PartNumberSpcPage({
         include: {
           items: {
             where: { inputType: "number" },
-            orderBy: [{ section: "asc" }, { no: "asc" }],
+            orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
             include: { specRanges: true },
           },
         },

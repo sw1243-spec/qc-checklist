@@ -178,7 +178,7 @@ export default async function NotificationsPage({
         )}
 
         <div style={{ marginTop: "16px", padding: "12px 14px", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: "10px", fontSize: "11px", color: "var(--text-3)", lineHeight: 1.6 }}>
-          📅 <strong>Automatic sending:</strong> To send yesterday&apos;s report every morning, call the <code>/api/cron/daily-report</code> endpoint from Windows Task Scheduler. (see separate guide)
+          📅 <strong>Automatic sending:</strong> To send a report at the end of each shift, schedule the <code>/api/cron/daily-report</code> endpoint in Windows Task Scheduler to run at each shift-end time (e.g. end of 1st &amp; 2nd shift). The report covers today&apos;s submissions up to that moment. (see separate guide)
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import { isAuthenticated } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { submitCorrectiveAction } from "@/app/actions";
 import PhotoUploader from "./PhotoUploader";
+import CorrectedValueInput from "./CorrectedValueInput";
 
 // ── 스펙 해석/판정 (ChecklistForm 과 동일 규칙) ──
 type Spec = { lineId: number | null; modelId: number | null; partNumberId: number | null; minVal: number | null; maxVal: number | null; label: string | null };
@@ -30,11 +31,15 @@ function isOOR(value: string | null, spec: Spec | null): boolean {
 
 // 화면 표시용 스펙 텍스트
 function specText(spec: Spec | null, inputType: string, unit: string | null): string {
-  if (spec?.label) return spec.label;
-  if (spec && (spec.minVal !== null || spec.maxVal !== null)) {
+  if (!spec) return inputType === "ok_ng" ? "OK / NG" : "";
+  const hasRange = spec.minVal !== null || spec.maxVal !== null;
+  if (hasRange) {
     const sep = spec.minVal !== null && spec.maxVal !== null ? " ~ " : "";
-    return `${spec.minVal ?? ""}${sep}${spec.maxVal ?? ""}${unit ? ` ${unit}` : ""}`;
+    const range = `${spec.minVal ?? ""}${sep}${spec.maxVal ?? ""}${unit ? ` ${unit}` : ""}`;
+    // 범위 + (마스터 게이지 코드 등 라벨이 따로 있으면 함께)
+    return spec.label ? `${range}  ·  ${spec.label}` : range;
   }
+  if (spec.label) return spec.label; // 범위 없는 항목(그리스 등)은 라벨만
   return inputType === "ok_ng" ? "OK / NG" : "";
 }
 
@@ -62,19 +67,63 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
       logs: { orderBy: { editedAt: "desc" } },
       values: {
         include: { item: { include: { specRanges: true } } },
-        orderBy: [{ item: { no: "asc" } }, { shift: "asc" }, { partNo: "asc" }],
+        orderBy: [{ item: { sortOrder: "asc" } }, { shift: "asc" }, { partNo: "asc" }],
       },
     },
   });
   if (!submission) notFound();
 
+  // 같은 날 + 같은 PN 그리스 교체 이력 (있을 때만)
+  const greaseLogs = submission.partNumberId
+    ? await prisma.greaseLog.findMany({
+        where: {
+          partNumberId: submission.partNumberId,
+          date: {
+            gte: (() => { const d = new Date(submission.date); d.setHours(0, 0, 0, 0); return d; })(),
+            lt:  (() => { const d = new Date(submission.date); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 1); return d; })(),
+          },
+        },
+        orderBy: { changedAt: "asc" },
+      })
+    : [];
+  const greaseOut = greaseLogs.filter((g) => g.side === "outboard");
+  const greaseIn  = greaseLogs.filter((g) => g.side === "inboard");
+
   const sampleLabels = submission.template.sampleLabels.split(",");
   const shifts = [...new Set(submission.values.map((v) => v.shift))].sort();
   const partNos = [...new Set(submission.values.map((v) => v.partNo))].sort();
 
+  // 마감이 지난 shift에만 Edit 버튼 표시
+  const shiftConfigs = await prisma.shiftConfig.findMany({ where: { order: { in: shifts } } });
+  const now = new Date();
+  const subDateStr = new Date(submission.date).toISOString().slice(0, 10);
+  const todayStr = now.toISOString().slice(0, 10);
+
+  const closedShifts = shifts.filter((sh) => {
+    const cfg = shiftConfigs.find((c) => c.order === sh);
+    if (!cfg) return subDateStr < todayStr; // ShiftConfig 없으면 날짜만 비교
+    if (subDateStr < todayStr) return true; // 제출일이 오늘 이전이면 무조건 닫힘
+    // 제출일 = 오늘: 마감 시각이 지났는지 확인
+    const deadline = new Date(`${subDateStr}T00:00:00`);
+    deadline.setHours(cfg.endHour, cfg.endMinute, 59, 999);
+    return now > deadline;
+  });
+
+  const editLinks = closedShifts.map((sh) => {
+    const params = new URLSearchParams({
+      lineId: String(submission.lineId),
+      modelId: String(submission.modelId ?? ""),
+      shift: String(sh),
+      submissionId: String(submission.id),
+    });
+    if (submission.partNumberId) params.set("partNumberId", String(submission.partNumberId));
+    return { shift: sh, url: `/checklist/${submission.templateId}?${params.toString()}` };
+  });
+
   const shiftMeta: Record<number, { le: string | null; qc: string | null }> = {
     1: { le: submission.shift1LE, qc: submission.shift1QC },
     2: { le: submission.shift2LE, qc: submission.shift2QC },
+    3: { le: submission.shift3LE ?? null, qc: submission.shift3QC ?? null },
   };
 
   // OOR 항목만 추출
@@ -86,6 +135,7 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
       id: v.id, itemId: v.itemId, shift: v.shift, partNo: v.partNo,
       valueText: v.valueText, correctedText: v.correctedText,
       specLabel: specText(spec, v.item.inputType, v.item.unit),
+      minVal: spec?.minVal ?? null, maxVal: spec?.maxVal ?? null,
       item: { no: v.item.no, opNo: v.item.opNo, characteristic: v.item.characteristic, inputType: v.item.inputType },
     };
   });
@@ -121,6 +171,20 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
           </div>
 
           <div style={{ paddingTop: "2px", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+            {editLinks.map(({ shift: sh, url }) => (
+              <Link key={sh} href={url} style={{
+                fontSize: "12px", fontWeight: "600", padding: "5px 12px",
+                background: "var(--panel)", border: "1px solid var(--border)",
+                borderRadius: "8px", textDecoration: "none", color: "var(--text-2)",
+                display: "flex", alignItems: "center", gap: "5px",
+              }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+                Edit Shift {sh}
+              </Link>
+            ))}
             {submission.hasOutOfRange ? (
               <span className="status-pill warn">
                 <span className="status-dot warn" />
@@ -359,6 +423,38 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
         );
       })}
 
+      {/* ── Grease Change Timeline ───────────────────── */}
+      {greaseLogs.length > 0 && (
+        <div className="fade-up" style={{ marginTop: "32px" }}>
+          <p className="ios-section-label">Grease Change Log</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+            {([["Outboard", greaseOut], ["Inboard", greaseIn]] as const).map(([title, list]) => (
+              <div key={title} className="liquid-glass" style={{ padding: "16px 18px" }}>
+                <div style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-2)", marginBottom: "12px" }}>{title}</div>
+                {list.length === 0 ? (
+                  <p style={{ fontSize: "12px", color: "var(--text-3)", fontStyle: "italic" }}>No records</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {list.map((g, i) => (
+                      <div key={g.id} style={{ display: "flex", alignItems: "baseline", gap: "10px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--accent)", fontFamily: "monospace", flexShrink: 0 }}>
+                          {new Date(g.changedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}
+                        </span>
+                        <span style={{ fontSize: "13px", color: "var(--text-1)" }}>
+                          {g.batchCode}
+                          {g.operator && <span style={{ fontSize: "11px", color: "var(--text-3)", marginLeft: "6px" }}>· {g.operator}</span>}
+                          {i === 0 && <span style={{ fontSize: "10px", color: "var(--text-3)", marginLeft: "6px" }}>(start)</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Photos ───────────────────────────────────── */}
       {submission.hasOutOfRange && (
         <div className="fade-up" style={{ marginTop: "32px" }}>
@@ -379,7 +475,6 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
           {ca ? (
             <div className="liquid-glass" style={{ padding: "24px" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <Row label="Cause" value={ca.cause ?? "-"} />
                 <Row label="Action Taken" value={ca.action ?? "-"} />
                 <Row label="Resolved By" value={ca.resolvedBy ?? "-"} />
                 <div style={{ fontSize: "11px", color: "var(--text-3)", marginTop: "4px" }}>
@@ -388,7 +483,7 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
               </div>
               <details style={{ marginTop: "16px" }}>
                 <summary style={{ fontSize: "13px", color: "var(--text-3)", cursor: "pointer" }}>Edit</summary>
-                <CaForm submissionId={submission.id} defaultCause={ca.cause ?? ""} defaultAction={ca.action ?? ""} defaultResolvedBy={ca.resolvedBy ?? ""} oorValues={oorForm} />
+                <CaForm submissionId={submission.id} defaultAction={ca.action ?? ""} defaultResolvedBy={ca.resolvedBy ?? ""} oorValues={oorForm} />
               </details>
             </div>
           ) : (
@@ -396,7 +491,7 @@ export default async function SubmissionPage({ params }: { params: Promise<{ id:
               <p style={{ fontSize: "13px", color: "var(--danger)", marginBottom: "16px" }}>
                 ⚠️ No corrective action has been recorded yet.
               </p>
-              <CaForm submissionId={submission.id} defaultCause="" defaultAction="" defaultResolvedBy="" oorValues={oorForm} />
+              <CaForm submissionId={submission.id} defaultAction="" defaultResolvedBy="" oorValues={oorForm} />
             </div>
           )}
         </div>
@@ -447,11 +542,10 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-type OorValue = { id: number; itemId: number; shift: number; partNo: number; valueText: string | null; correctedText: string | null; specLabel: string; item: { no: number; opNo: string | null; characteristic: string; inputType: string } };
+type OorValue = { id: number; itemId: number; shift: number; partNo: number; valueText: string | null; correctedText: string | null; specLabel: string; minVal: number | null; maxVal: number | null; item: { no: number; opNo: string | null; characteristic: string; inputType: string } };
 
-function CaForm({ submissionId, defaultCause, defaultAction, defaultResolvedBy, oorValues }: {
+function CaForm({ submissionId, defaultAction, defaultResolvedBy, oorValues }: {
   submissionId: number;
-  defaultCause: string;
   defaultAction: string;
   defaultResolvedBy: string;
   oorValues: OorValue[];
@@ -459,10 +553,6 @@ function CaForm({ submissionId, defaultCause, defaultAction, defaultResolvedBy, 
   return (
     <form action={submitCorrectiveAction} style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "12px" }}>
       <input type="hidden" name="submissionId" value={submissionId} />
-      <div>
-        <label className="apple-label" style={{ display: "block", marginBottom: "6px" }}>Cause</label>
-        <textarea name="cause" defaultValue={defaultCause} rows={2} placeholder="Describe the cause of deviation" className="apple-input" style={{ resize: "vertical", fontFamily: "inherit" }} />
-      </div>
       <div>
         <label className="apple-label" style={{ display: "block", marginBottom: "6px" }}>Action Taken</label>
         <textarea name="action" defaultValue={defaultAction} rows={2} placeholder="Describe the corrective action taken" className="apple-input" style={{ resize: "vertical", fontFamily: "inherit" }} />
@@ -496,18 +586,12 @@ function CaForm({ submissionId, defaultCause, defaultAction, defaultResolvedBy, 
                     </span>
                   </div>
                 </div>
-                <input
-                  type="text"
-                  inputMode={v.item.inputType === "ok_ng" ? "text" : "decimal"}
-                  name={`correctedText_${v.id}`}
+                <CorrectedValueInput
+                  id={v.id}
+                  inputType={v.item.inputType}
+                  minVal={v.minVal}
+                  maxVal={v.maxVal}
                   defaultValue={v.correctedText ?? ""}
-                  placeholder={v.item.inputType === "ok_ng" ? "OK" : "New value"}
-                  style={{
-                    width: "90px", padding: "7px 10px", fontSize: "13px", textAlign: "center",
-                    border: "1.5px solid rgba(52,199,89,0.35)", borderRadius: "8px",
-                    background: "rgba(52,199,89,0.05)", color: "#34C759", fontWeight: "600",
-                    fontFamily: "inherit", outline: "none",
-                  }}
                 />
               </div>
             ))}

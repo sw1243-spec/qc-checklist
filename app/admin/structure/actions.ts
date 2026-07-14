@@ -59,8 +59,6 @@ export async function renameTemplateCode(id: number, code: string) {
   await requireAdmin();
   const v = code.trim();
   if (!v) return { error: "Code required" };
-  const dup = await prisma.checksheetTemplate.findFirst({ where: { code: v, id: { not: id } } });
-  if (dup) return { error: `Code "${v}" is already used by another template.` };
   await prisma.checksheetTemplate.update({ where: { id }, data: { code: v } });
   await logAudit({ action: "RENAME", entityType: "Template", entityId: id, detail: { code: v } });
   revalidatePath(R);
@@ -185,38 +183,5 @@ export async function delPartNumber(id: number) {
   revalidatePath(R);
 }
 
-// ── Template 연결 ─────────────────────────────────────────
-
-// 모델에 템플릿 직접 연결 (TemplateModel)
-export async function linkTemplateModel(modelId: number, templateId: number) {
-  await requireAdmin();
-  await prisma.templateModel.upsert({
-    where: { templateId_modelId: { templateId, modelId } },
-    create: { templateId, modelId },
-    update: {},
-  });
-  revalidatePath(R);
-}
-
-export async function unlinkTemplateModel(modelId: number, templateId: number) {
-  await requireAdmin();
-  await prisma.templateModel.deleteMany({ where: { templateId, modelId } });
-  revalidatePath(R);
-}
-
-// 파트넘버에 템플릿 연결 (PartNumberTemplate)
-export async function linkTemplatePartNumber(partNumberId: number, templateId: number) {
-  await requireAdmin();
-  await prisma.partNumberTemplate.upsert({
-    where: { partNumberId_templateId: { partNumberId, templateId } },
-    create: { partNumberId, templateId },
-    update: {},
-  });
-  revalidatePath(R);
-}
-
-export async function unlinkTemplatePartNumber(partNumberId: number, templateId: number) {
-  await requireAdmin();
-  await prisma.partNumberTemplate.deleteMany({ where: { partNumberId, templateId } });
-  revalidatePath(R);
-}
+// 템플릿 연결은 Admin > Models 페이지에서 관리
+// (structure/actions.ts 의 linkTemplate* 함수 제거 — 단일 진입점으로 통일)

@@ -30,7 +30,7 @@ if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
   console.error("   1) choco install mkcert      (Windows)");
   console.error("   2) mkcert -install            (로컬 CA 등록 - 1회만)");
   console.error("   3) mkdir certs                (폴더 생성)");
-  console.error("   4) mkcert -key-file certs/server-key.pem -cert-file certs/server-cert.pem localhost 127.0.0.1 10.64.244.29");
+  console.error("   4) mkcert -key-file certs/server-key.pem -cert-file certs/server-cert.pem localhost 127.0.0.1 <서버-IP>");
   console.error("   5) npm run start:https\n");
   process.exit(1);
 }

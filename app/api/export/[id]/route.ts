@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       model: true,
       values: {
         include: { item: { include: { specRanges: true } } },
-        orderBy: [{ item: { no: "asc" } }, { shift: "asc" }, { partNo: "asc" }],
+        orderBy: [{ item: { sortOrder: "asc" } }, { shift: "asc" }, { partNo: "asc" }],
       },
     },
   });

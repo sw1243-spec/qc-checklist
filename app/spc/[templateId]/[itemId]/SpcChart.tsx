@@ -37,8 +37,9 @@ export default function SpcChart({
     ...(ucl !== null ? [ucl] : []),
     ...(lcl !== null ? [lcl] : []),
   ];
-  const yMin = Math.min(...allVals);
-  const yMax = Math.max(...allVals);
+  // 빈 배열 방어 (allVals 비면 Math.min/max 가 ±Infinity 가 되어 축이 깨짐)
+  const yMin = allVals.length ? Math.min(...allVals) : 0;
+  const yMax = allVals.length ? Math.max(...allVals) : 1;
   const pad = (yMax - yMin) * 0.1 || Math.abs(yMin) * 0.05 || 1;
 
   // 적절한 소수점 자릿수 결정

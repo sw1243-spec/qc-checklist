@@ -55,7 +55,7 @@ export function DonutChart({ pass, oor }: { pass: number; oor: number }) {
     { name: "OOR",  value: oor  },
   ];
   const COLORS = ["#34C759", "#FF3B30"];
-  const pct = Math.round((pass / total) * 100);
+  const pct = total > 0 ? Math.round((pass / total) * 100) : 0;
 
   return (
     <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -86,7 +86,22 @@ export function PassRateChart({ data }: { data: LinePoint[] }) {
       <BarChart data={data} layout="vertical" margin={{ top: 0, right: 48, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
         <XAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={{ fontSize: 11, fill: "var(--text-3)" }} tickLine={false} axisLine={false} />
-        <YAxis type="category" dataKey="line" width={116} tick={{ fontSize: 12, fill: "var(--text-1)" }} tickLine={false} axisLine={false} interval={0} />
+        <YAxis
+          type="category"
+          dataKey="line"
+          width={140}
+          interval={0}
+          tickLine={false}
+          axisLine={false}
+          tick={(props: any) => {
+            const { x, y, payload } = props;
+            return (
+              <text x={x} y={y} dy={4} textAnchor="end" fontSize={12} fill="var(--text-1)">
+                {payload?.value}
+              </text>
+            );
+          }}
+        />
         <Tooltip
           contentStyle={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: "10px", fontSize: "13px" }}
           formatter={(value) => [`${value}%`, "Pass Rate"]}

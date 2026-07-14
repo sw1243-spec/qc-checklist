@@ -23,8 +23,8 @@ mkcert -install
 
 ### 3) 인증서 발급 (서버 IP 포함)
 ```powershell
-cd C:\Users\jin.sewoon\Desktop\qc-checklist
-mkcert -key-file certs/server-key.pem -cert-file certs/server-cert.pem localhost 127.0.0.1 10.64.244.29
+cd <프로젝트-경로>
+mkcert -key-file certs/server-key.pem -cert-file certs/server-cert.pem localhost 127.0.0.1 <서버-IP>
 ```
 ※ 실제 서버 IP를 추가하세요. 도메인 있으면 `qc.회사.local` 같은 것도 추가 가능.
 
@@ -33,7 +33,7 @@ mkcert -key-file certs/server-key.pem -cert-file certs/server-cert.pem localhost
 npm run build
 npm run start:https
 ```
-→ `https://10.64.244.29:3443` 에서 접속 가능 (포트 3443 기본)
+→ `https://<서버-IP>:3443` 에서 접속 가능 (포트 3443 기본)
 
 ## 각 접속 디바이스 (태블릿/PC)에서 (1회씩)
 
@@ -51,7 +51,7 @@ mkcert -CAROOT
 3. "다음" → **신뢰할 수 있는 루트 인증 기관**에 저장
 4. 완료 후 브라우저 재시작
 
-→ 이후 `https://10.64.244.29:3443` 접속 시 **경고창 없음** + 카메라 권한 작동
+→ 이후 `https://<서버-IP>:3443` 접속 시 **경고창 없음** + 카메라 권한 작동
 
 ## 방화벽 (서버 PC)
 

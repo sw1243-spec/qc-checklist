@@ -14,6 +14,106 @@ export async function reorderTemplates(ids: number[]) {
   revalidatePath("/admin/templates");
 }
 
+// ── Template Delete ──────────────────────────────────────
+
+export async function deleteTemplate(templateId: number) {
+  await requireAdmin();
+  // 제출 기록이 있으면 삭제 차단
+  const subCount = await prisma.submission.count({ where: { templateId } });
+  if (subCount > 0) {
+    return { error: `제출 기록 ${subCount}건이 있어 삭제할 수 없습니다.` };
+  }
+  // 연결 데이터 정리 후 삭제
+  await prisma.templateModel.deleteMany({ where: { templateId } });
+  await prisma.partNumberTemplate.deleteMany({ where: { templateId } });
+  await prisma.chartTemplate.deleteMany({ where: { templateId } });
+  const items = await prisma.checkItem.findMany({ where: { templateId }, select: { id: true } });
+  const itemIds = items.map((i) => i.id);
+  if (itemIds.length) {
+    await prisma.specRange.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.chartMetric.deleteMany({ where: { itemId: { in: itemIds } } });
+    await prisma.checkItem.deleteMany({ where: { templateId } });
+  }
+  await prisma.checksheetTemplate.delete({ where: { id: templateId } });
+  revalidatePath("/admin/templates");
+  revalidatePath("/company", "layout");
+}
+
+// 템플릿 복제 — 항목/스펙/차트 설정까지 통째로 복사 (모델/PN 링크는 복사 안 함)
+export async function duplicateTemplate(templateId: number) {
+  await requireAdmin();
+  const src = await prisma.checksheetTemplate.findUnique({
+    where: { id: templateId },
+    include: {
+      items: { include: { specRanges: true, chartMetric: true } },
+      chartTemplate: true,
+    },
+  });
+  if (!src) return { error: "템플릿을 찾을 수 없습니다." };
+
+  const newCode = `${src.code}-copy`;
+
+  const maxOrder = await prisma.checksheetTemplate.aggregate({ _max: { sortOrder: true } });
+
+  const created = await prisma.checksheetTemplate.create({
+    data: {
+      code: newCode,
+      name: `${src.name} (Copy)`,
+      version: src.version,
+      sampleCount: src.sampleCount,
+      sampleLabels: src.sampleLabels,
+      sortOrder: (maxOrder._max.sortOrder ?? 0) + 1,
+      note: src.note,
+    },
+  });
+
+  // 항목 + 스펙 + 차트메트릭 복사
+  for (const item of src.items) {
+    const newItem = await prisma.checkItem.create({
+      data: {
+        templateId: created.id,
+        section: item.section,
+        opNo: item.opNo,
+        no: item.no,
+        characteristic: item.characteristic,
+        method: item.method,
+        sample: item.sample,
+        inputType: item.inputType,
+        unit: item.unit,
+        nullable: item.nullable,
+        department: item.department,
+        sortOrder: item.sortOrder,
+      },
+    });
+    if (item.specRanges.length) {
+      await prisma.specRange.createMany({
+        data: item.specRanges.map((s) => ({
+          itemId: newItem.id,
+          lineId: s.lineId,
+          modelId: s.modelId,
+          partNumberId: s.partNumberId,
+          minVal: s.minVal,
+          maxVal: s.maxVal,
+          label: s.label,
+        })),
+      });
+    }
+    if (item.chartMetric) {
+      await prisma.chartMetric.create({
+        data: { itemId: newItem.id, metric: item.chartMetric.metric, unit: item.chartMetric.unit },
+      });
+    }
+  }
+
+  // 차트 템플릿 설정 복사
+  if (src.chartTemplate) {
+    await prisma.chartTemplate.create({ data: { templateId: created.id } });
+  }
+
+  revalidatePath("/admin/templates");
+  return { ok: true, newId: created.id };
+}
+
 // ── Template Create ───────────────────────────────────────
 
 export async function createTemplate(formData: FormData) {
@@ -43,21 +143,24 @@ export async function updateTemplate(templateId: number, data: {
   sampleCount: number;
   sampleLabels: string;
   note: string;
+  responsible: string;
 }) {
   await requireAdmin();
   await prisma.checksheetTemplate.update({
     where: { id: templateId },
     data: {
-      code:         data.code.trim(),
+      code: data.code.trim(),
       name:         data.name.trim(),
       version:      data.version.trim(),
       sampleCount:  data.sampleCount,
       sampleLabels: data.sampleLabels.trim(),
       note:         data.note.trim() || null,
+      responsible:  data.responsible.trim() || null,
     },
   });
   revalidatePath(`/admin/templates/${templateId}`);
   revalidatePath("/admin/templates");
+  revalidatePath("/company", "layout");
 }
 
 // ── Check Items ──────────────────────────────────────────
@@ -74,6 +177,9 @@ export async function createCheckItem(templateId: number, data: {
   department?: string;
 }) {
   await requireAdmin();
+  // 새 항목은 템플릿 내 현재 최대 sortOrder + 1 (항상 맨 끝에 추가)
+  const maxRow = await prisma.checkItem.aggregate({ where: { templateId }, _max: { sortOrder: true } });
+  const nextOrder = (maxRow._max.sortOrder ?? -1) + 1;
   await prisma.checkItem.create({
     data: {
       templateId,
@@ -86,6 +192,7 @@ export async function createCheckItem(templateId: number, data: {
       nullable: data.nullable,
       opNo: data.opNo.trim() || null,
       department: data.department || null,
+      sortOrder: nextOrder,
     },
   });
   revalidatePath(`/admin/templates/${templateId}`);
@@ -120,49 +227,115 @@ export async function updateCheckItem(itemId: number, templateId: number, data: 
   revalidatePath(`/admin/templates/${templateId}`);
 }
 
-// 같은 섹션 안에서 항목 순서 이동 (인접 항목과 no 값 교환)
+export async function updateCheckItemNote(itemId: number, templateId: number, note: string) {
+  await requireAdmin();
+  await prisma.checkItem.update({
+    where: { id: itemId },
+    data: { note: note.trim() || null },
+  });
+  revalidatePath(`/admin/templates/${templateId}`);
+}
+
+// ↑/↓ 이동: 같은 섹션 안에서만 (sortOrder 기준)
 export async function moveCheckItem(itemId: number, templateId: number, direction: "up" | "down") {
   await requireAdmin();
-  const item = await prisma.checkItem.findUnique({ where: { id: itemId } });
+  const item = await prisma.checkItem.findUnique({ where: { id: itemId }, select: { section: true } });
   if (!item) return;
 
-  // 같은 템플릿·같은 섹션의 형제 항목들을 표시 순서대로
-  const siblings = await prisma.checkItem.findMany({
+  let siblings = await prisma.checkItem.findMany({
     where: { templateId, section: item.section },
-    orderBy: { no: "asc" },
-    select: { id: true, no: true },
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+    select: { id: true, sortOrder: true },
   });
 
-  const idx = siblings.findIndex((s) => s.id === itemId);
+  // sortOrder 중복이면 0..N-1 정규화
+  const hasDup = new Set(siblings.map((i) => i.sortOrder)).size !== siblings.length;
+  if (hasDup) {
+    await prisma.$transaction(
+      siblings.map((s, i) => prisma.checkItem.update({ where: { id: s.id }, data: { sortOrder: i } }))
+    );
+    siblings = await prisma.checkItem.findMany({
+      where: { templateId, section: item.section },
+      orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+      select: { id: true, sortOrder: true },
+    });
+  }
+
+  const idx = siblings.findIndex((i) => i.id === itemId);
   const swapIdx = direction === "up" ? idx - 1 : idx + 1;
-  if (idx === -1 || swapIdx < 0 || swapIdx >= siblings.length) return; // 경계면 무시
+  if (idx === -1 || swapIdx < 0 || swapIdx >= siblings.length) return;
 
   const a = siblings[idx];
   const b = siblings[swapIdx];
+  await prisma.$transaction([
+    prisma.checkItem.update({ where: { id: a.id }, data: { sortOrder: b.sortOrder } }),
+    prisma.checkItem.update({ where: { id: b.id }, data: { sortOrder: a.sortOrder } }),
+  ]);
+  revalidatePath(`/admin/templates/${templateId}`);
+}
 
-  // no 값이 같으면 교환이 무의미 → 섹션 전체를 1..N 으로 재정렬 후 교환
-  if (a.no === b.no) {
-    let n = 1;
-    for (const s of siblings) {
-      await prisma.checkItem.update({ where: { id: s.id }, data: { no: n++ } });
-    }
-    const fresh = await prisma.checkItem.findMany({
-      where: { templateId, section: item.section },
-      orderBy: { no: "asc" },
-      select: { id: true, no: true },
-    });
-    const fa = fresh[idx], fb = fresh[swapIdx];
-    await prisma.$transaction([
-      prisma.checkItem.update({ where: { id: fa.id }, data: { no: fb.no } }),
-      prisma.checkItem.update({ where: { id: fb.id }, data: { no: fa.no } }),
-    ]);
-  } else {
-    await prisma.$transaction([
-      prisma.checkItem.update({ where: { id: a.id }, data: { no: b.no } }),
-      prisma.checkItem.update({ where: { id: b.id }, data: { no: a.no } }),
-    ]);
+// 드래그 앤 드롭: 같은 섹션 안에서 itemId 를 targetId 위치로 이동
+export async function reorderCheckItemTo(itemId: number, targetId: number, templateId: number) {
+  await requireAdmin();
+  if (itemId === targetId) return;
+
+  const [src, dst] = await Promise.all([
+    prisma.checkItem.findUnique({ where: { id: itemId },   select: { section: true } }),
+    prisma.checkItem.findUnique({ where: { id: targetId }, select: { section: true } }),
+  ]);
+  // 다른 섹션이면 무시
+  if (!src || !dst || src.section !== dst.section) return;
+
+  const siblings = await prisma.checkItem.findMany({
+    where: { templateId, section: src.section },
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+    select: { id: true },
+  });
+
+  const fromIdx = siblings.findIndex((i) => i.id === itemId);
+  const toIdx   = siblings.findIndex((i) => i.id === targetId);
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  const reordered = [...siblings];
+  const [moved] = reordered.splice(fromIdx, 1);
+  reordered.splice(toIdx, 0, moved);
+
+  await prisma.$transaction(
+    reordered.map((s, i) => prisma.checkItem.update({ where: { id: s.id }, data: { sortOrder: i } }))
+  );
+  revalidatePath(`/admin/templates/${templateId}`);
+}
+
+export async function moveCheckSection(templateId: number, section: string, direction: "up" | "down") {
+  await requireAdmin();
+  const sectionName = section.trim();
+  if (!sectionName) return;
+
+  const items = await prisma.checkItem.findMany({
+    where: { templateId },
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+    select: { id: true, section: true },
+  });
+
+  const sections: string[] = [];
+  for (const item of items) {
+    if (!sections.includes(item.section)) sections.push(item.section);
   }
 
+  const idx = sections.findIndex((s) => s === sectionName);
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (idx === -1 || swapIdx < 0 || swapIdx >= sections.length) return;
+
+  const reorderedSections = [...sections];
+  const movedSection = reorderedSections[idx];
+  if (movedSection === undefined) return;
+  reorderedSections.splice(idx, 1);
+  reorderedSections.splice(swapIdx, 0, movedSection);
+
+  const reorderedItems = reorderedSections.flatMap((name) => items.filter((item) => item.section === name));
+  await prisma.$transaction(
+    reorderedItems.map((item, i) => prisma.checkItem.update({ where: { id: item.id }, data: { sortOrder: i } }))
+  );
   revalidatePath(`/admin/templates/${templateId}`);
 }
 
@@ -269,9 +442,10 @@ async function siblingPartNumberIds(partNumberId: number): Promise<number[]> {
   return sibs.length ? sibs.map((s) => s.id) : [partNumberId];
 }
 
-// 논리적 파트넘버(코드) 단위 스펙 설정 — 모든 라인 사본에 동일하게 적용.
-// partNumberId === null 이면 전체(global) 스펙.
-export async function upsertSpecRangeGroup(itemId: number, templateId: number, data: {
+// 스펙 추가/수정 — 한 항목에 스펙 여러 개 가능(IB/OB 등). 파트넘버 지정 시 모든 라인 사본에 적용.
+// oldIds 가 있으면 그 스펙들을 교체(수정), 비어있으면 신규 추가. partNumberId === null 이면 전체(global).
+export async function saveSpecGroup(itemId: number, templateId: number, data: {
+  oldIds: number[];
   partNumberId: number | null;
   minVal: string;
   maxVal: string;
@@ -287,32 +461,23 @@ export async function upsertSpecRangeGroup(itemId: number, templateId: number, d
     return { error: "Number items require at least one of Min or Max (without a range, pass/fail cannot be judged)." };
   }
 
-  if (data.partNumberId === null) {
-    // 전체(global) 스펙: 기존 1개 갱신, 없으면 생성
-    const existing = await prisma.specRange.findFirst({ where: { itemId, partNumberId: null, lineId: null, modelId: null } });
-    if (existing) await prisma.specRange.update({ where: { id: existing.id }, data: { minVal, maxVal, label } });
-    else await prisma.specRange.create({ data: { itemId, minVal, maxVal, label } });
-  } else {
-    // 파트넘버 스펙: 모든 라인 사본에 동일하게 (기존 제거 후 재생성)
-    // deleteMany + createMany 를 트랜잭션으로 묶어 중간 실패 시 스펙 유실 방지
-    const ids = await siblingPartNumberIds(data.partNumberId);
-    await prisma.$transaction([
-      prisma.specRange.deleteMany({ where: { itemId, partNumberId: { in: ids } } }),
-      prisma.specRange.createMany({ data: ids.map((pid) => ({ itemId, partNumberId: pid, minVal, maxVal, label })) }),
-    ]);
-  }
+  // 적용 대상 partNumber id 목록 (전체면 [null], 파트넘버면 모든 라인 사본)
+  const targetIds: (number | null)[] = data.partNumberId !== null
+    ? await siblingPartNumberIds(data.partNumberId)
+    : [null];
+
+  // 수정이면 기존 스펙 제거 후 재생성을 트랜잭션으로 (원자성)
+  await prisma.$transaction([
+    ...(data.oldIds.length ? [prisma.specRange.deleteMany({ where: { id: { in: data.oldIds } } })] : []),
+    prisma.specRange.createMany({ data: targetIds.map((pid) => ({ itemId, partNumberId: pid, minVal, maxVal, label })) }),
+  ]);
   revalidatePath(`/admin/templates/${templateId}`);
 }
 
-// 논리적 파트넘버(코드) 단위 스펙 삭제 — 모든 라인 사본 제거. partNumberId === null 이면 global 삭제.
-export async function deleteSpecRangeGroup(itemId: number, templateId: number, partNumberId: number | null) {
+// 스펙 삭제 — 주어진 스펙 id들(한 그룹의 라인 사본 전부)을 제거.
+export async function deleteSpecRangeByIds(ids: number[], templateId: number) {
   await requireAdmin();
-  if (partNumberId === null) {
-    await prisma.specRange.deleteMany({ where: { itemId, partNumberId: null, lineId: null, modelId: null } });
-  } else {
-    const ids = await siblingPartNumberIds(partNumberId);
-    await prisma.specRange.deleteMany({ where: { itemId, partNumberId: { in: ids } } });
-  }
+  if (ids.length) await prisma.specRange.deleteMany({ where: { id: { in: ids } } });
   revalidatePath(`/admin/templates/${templateId}`);
 }
 
@@ -403,4 +568,21 @@ export async function deleteWorker(formData: FormData) {
   if (!id) return;
   await prisma.worker.delete({ where: { id } });
   revalidatePath("/admin/workers");
+}
+
+// ── Shift Config ──────────────────────────────────────────
+// 시프트는 고정 3개(1st/2nd/3rd)이므로 추가/삭제 없이 수정만 지원
+
+export async function updateShiftConfig(formData: FormData) {
+  await requireAdmin();
+  const id          = Number(formData.get("id"));
+  const name        = (formData.get("name") as string).trim();
+  const startHour   = Number(formData.get("startHour"));
+  const startMinute = Number(formData.get("startMinute"));
+  const endHour     = Number(formData.get("endHour"));
+  const endMinute   = Number(formData.get("endMinute"));
+  const isActive    = formData.get("isActive") === "true";
+  if (!id || !name) return;
+  await prisma.shiftConfig.update({ where: { id }, data: { name, startHour, startMinute, endHour, endMinute, isActive } });
+  revalidatePath("/SWJ/shifts");
 }

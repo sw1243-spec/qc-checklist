@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { isAuthenticated } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { hasAnyProductionPending } from "@/lib/submissionDepartmentStatus";
 
 const PAGE_SIZE = 20;
 
@@ -12,6 +13,7 @@ export default async function HistoryPage({
     company?: string;
     line?: string;
     oor?: string;
+    shift?: string;
     from?: string;
     to?: string;
     page?: string;
@@ -25,19 +27,24 @@ export default async function HistoryPage({
   const oor = sp.oor === "1" ? true : sp.oor === "0" ? false : undefined;
 
   // 날짜 범위 기본값: 이번 달 1일 ~ 오늘
-  const toDate = sp.to ? new Date(sp.to) : new Date();
+  // "YYYY-MM-DD"를 그냥 new Date()에 넣으면 UTC 자정으로 파싱돼 타임존 어긋남 →
+  // 'T00:00:00'을 붙여 로컬 자정으로 파싱 (submission.date 저장 기준과 일치)
+  const toDate = sp.to ? new Date(sp.to + "T00:00:00") : new Date();
   toDate.setHours(23, 59, 59, 999);
-  const fromDate = sp.from ? new Date(sp.from) : (() => {
+  const fromDate = sp.from ? new Date(sp.from + "T00:00:00") : (() => {
     const d = new Date(toDate);
     d.setDate(1);
     d.setHours(0, 0, 0, 0);
     return d;
   })();
 
-  const companies = await prisma.company.findMany({
-    orderBy: { code: "asc" },
-    include: { lines: { orderBy: { code: "asc" } } },
-  });
+  const [companies, activeShifts] = await Promise.all([
+    prisma.company.findMany({
+      orderBy: { code: "asc" },
+      include: { lines: { orderBy: { code: "asc" } } },
+    }),
+    prisma.shiftConfig.findMany({ where: { isActive: true }, orderBy: { order: "asc" } }),
+  ]);
 
   // 선택된 회사의 라인 목록
   const selectedCompany = companies.find((c) => c.code === sp.company);
@@ -46,8 +53,15 @@ export default async function HistoryPage({
   const unhandled = sp.oor === "unhandled";
   const q = (sp.q ?? "").trim();
 
+  const shiftFilter =
+    sp.shift === "1" ? { OR: [{ AND: [{ shift1LE: { not: null } }, { shift1LE: { not: "" } }] }, { AND: [{ shift1QC: { not: null } }, { shift1QC: { not: "" } }] }] } :
+    sp.shift === "2" ? { OR: [{ AND: [{ shift2LE: { not: null } }, { shift2LE: { not: "" } }] }, { AND: [{ shift2QC: { not: null } }, { shift2QC: { not: "" } }] }] } :
+    sp.shift === "3" ? { OR: [{ AND: [{ shift3LE: { not: null } }, { shift3LE: { not: "" } }] }, { AND: [{ shift3QC: { not: null } }, { shift3QC: { not: "" } }] }] } :
+    {};
+
   const where = {
     date: { gte: fromDate, lte: toDate },
+    ...shiftFilter,
     ...(sp.line ? { lineId: Number(sp.line) } : sp.company ? { line: { company: { code: sp.company } } } : {}),
     ...(unhandled
       ? { hasOutOfRange: true, correctiveAction: null }
@@ -78,16 +92,46 @@ export default async function HistoryPage({
       include: {
         line: { include: { company: true } },
         model: true,
-        template: { select: { code: true, name: true } },
+        template: { select: { code: true, name: true, items: { where: { department: "PROD" }, select: { id: true }, take: 1 } } },
         correctiveAction: { select: { id: true } },
       },
-      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ date: "desc" }, { partNumberBuild: "asc" }, { modelName: "asc" }, { createdAt: "desc" }],
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
   ]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  // 제출 건에 채워진 시프트 판정 (한 제출이 1·2교대를 같이 담을 수 있음)
+  type Sub = (typeof submissions)[number];
+  const subShifts = (s: Sub): number[] => {
+    const arr: number[] = [];
+    if ((s.shift1LE ?? "").trim() || (s.shift1QC ?? "").trim()) arr.push(1);
+    if ((s.shift2LE ?? "").trim() || (s.shift2QC ?? "").trim()) arr.push(2);
+    if ((s.shift3LE ?? "").trim() || (s.shift3QC ?? "").trim()) arr.push(3);
+    if (arr.length === 0 && s.shift != null) arr.push(s.shift);
+    return arr;
+  };
+
+  // 같은 날 + 같은 PN(라인·모델 포함) 제출 건을 그룹으로 묶기
+  const groups: { key: string; date: Date; company: string; line: string; model: string; pn: string; shifts: Set<number>; items: Sub[] }[] = [];
+  for (const s of submissions) {
+    const company = s.companyName ?? s.line.company.name;
+    const line    = s.lineName    ?? s.line.code;
+    const model   = s.modelName   ?? s.model?.name ?? "-";
+    const pn      = s.partNumberBuild || "—";
+    const dateStr = new Date(s.date).toISOString().slice(0, 10);
+    const key = `${dateStr}|${company}|${line}|${model}|${pn}`;
+    const last = groups[groups.length - 1];
+    const shifts = subShifts(s);
+    if (last && last.key === key) {
+      last.items.push(s);
+      shifts.forEach((sh) => last.shifts.add(sh));
+    } else {
+      groups.push({ key, date: s.date, company, line, model, pn, shifts: new Set(shifts), items: [s] });
+    }
+  }
 
   const toStr = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -97,6 +141,7 @@ export default async function HistoryPage({
       ...(sp.company && { company: sp.company }),
       ...(sp.line && { line: sp.line }),
       ...(sp.oor !== undefined && { oor: sp.oor }),
+      ...(sp.shift && { shift: sp.shift }),
       ...(q && { q }),
       from: toStr(fromDate),
       to: toStr(toDate),
@@ -186,7 +231,7 @@ export default async function HistoryPage({
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px" }}>
           <div>
             <label className="apple-label" style={{ display: "block", marginBottom: "5px" }}>Company</label>
             <select name="company" defaultValue={sp.company ?? ""} className="apple-input" style={{ fontSize: "14px" }}>
@@ -202,6 +247,15 @@ export default async function HistoryPage({
               <option value="">All</option>
               {lines.map((l) => (
                 <option key={l.id} value={l.id}>Line {l.code}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="apple-label" style={{ display: "block", marginBottom: "5px" }}>Shift</label>
+            <select name="shift" defaultValue={sp.shift ?? ""} className="apple-input" style={{ fontSize: "14px" }}>
+              <option value="">All</option>
+              {activeShifts.map((s) => (
+                <option key={s.order} value={String(s.order)}>{s.name}</option>
               ))}
             </select>
           </div>
@@ -224,60 +278,95 @@ export default async function HistoryPage({
         </div>
       </form>
 
-      {/* 리스트 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-        {submissions.length === 0 && (
+      {/* 리스트 — 같은 날 + 같은 PN 그룹으로 묶음 */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        {groups.length === 0 && (
           <div className="liquid-glass" style={{ padding: "32px", textAlign: "center" }}>
             <p style={{ fontSize: "14px", color: "var(--text-3)" }}>No records found.</p>
           </div>
         )}
-        {submissions.map((s, i) => {
-          const companyName = s.companyName ?? s.line.company.name;
-          const lineName    = s.lineName    ?? s.line.code;
-          const modelName   = s.modelName   ?? s.model?.name ?? "-";
-          const dateStr = new Date(s.date).toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" });
+        {groups.map((g, gi) => {
+          const dateStr = new Date(g.date).toLocaleDateString("en-US", { year: "numeric", month: "2-digit", day: "2-digit" });
           return (
-            <Link
-              key={s.id}
-              href={`/submission/${s.id}`}
-              className="liquid-glass"
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "14px 18px", textDecoration: "none",
-                animationDelay: `${i * 0.02}s`,
-              }}
+            <div
+              key={g.key}
+              className="liquid-glass fade-up"
+              style={{ padding: "14px 16px", animationDelay: `${gi * 0.03}s` }}
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                  <span style={{ fontSize: "15px", fontWeight: "600", color: "var(--text-1)" }}>
-                    {companyName} · Line {lineName}
-                  </span>
-                  {s.hasOutOfRange && (
-                    s.correctiveAction ? (
-                      <span style={{
-                        fontSize: "10px", fontWeight: "700", padding: "2px 7px",
-                        background: "rgba(52,199,89,0.10)", color: "#34C759",
-                        border: "1px solid rgba(52,199,89,0.25)", borderRadius: "999px",
-                      }}>OOR ✓</span>
-                    ) : (
-                      <span style={{
-                        fontSize: "10px", fontWeight: "700", padding: "2px 7px",
-                        background: "rgba(255,59,48,0.10)", color: "var(--danger)",
-                        border: "1px solid rgba(255,59,48,0.20)", borderRadius: "999px",
-                      }}>OOR !</span>
-                    )
+              {/* 그룹 헤더 */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px", flexWrap: "wrap", gap: "4px" }}>
+                <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-1)" }}>
+                  {g.company} · Line {g.line}
+                  <span style={{ fontWeight: "500", color: "var(--text-2)", marginLeft: "8px" }}>{g.model}</span>
+                  {g.pn !== "—" && (
+                    <span style={{
+                      fontSize: "11px", fontWeight: "600", marginLeft: "8px", padding: "2px 8px",
+                      background: "var(--panel)", border: "1px solid var(--border)",
+                      borderRadius: "999px", color: "var(--text-2)",
+                    }}>{g.pn}</span>
                   )}
-                </div>
-                <div style={{ fontSize: "13px", color: "var(--text-3)" }}>
-                  {modelName}
-                  {s.partNumberBuild && <span style={{ marginLeft: "6px", opacity: 0.7 }}>· {s.partNumberBuild}</span>}
-                  <span style={{ marginLeft: "8px" }}>{dateStr}</span>
-                </div>
+                </span>
+                <span style={{ fontSize: "12px", color: "var(--text-3)", fontWeight: "500" }}>{dateStr}</span>
               </div>
-              <svg width="8" height="13" viewBox="0 0 8 13" fill="none" style={{ flexShrink: 0, marginLeft: "12px" }}>
-                <path d="M1 1l6 5.5L1 12" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </Link>
+
+              {/* 그룹 내 제출 건 (체크시트별) */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                {g.items.map((s) => {
+                  const tplName = s.template?.name ?? s.templateName ?? s.templateCode ?? "Check Sheet";
+                  const productionPending = (s.template?.items.length ?? 0) > 0 && hasAnyProductionPending(s);
+                  return (
+                    <Link
+                      key={s.id}
+                      href={`/submission/${s.id}`}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "9px 12px", textDecoration: "none",
+                        background: "var(--card)", border: "1px solid var(--border)",
+                        borderRadius: "8px",
+                      }}
+                    >
+                      <span style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "13px", fontWeight: "500", color: "var(--text-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {tplName}
+                        </span>
+                        {subShifts(s).map((sh) => (
+                          <span key={sh} style={{
+                            fontSize: "9px", fontWeight: "700", padding: "2px 6px", flexShrink: 0,
+                            background: "rgba(48,84,150,0.10)", color: "#305496",
+                            border: "1px solid rgba(48,84,150,0.20)", borderRadius: "999px",
+                          }}>Shift {sh}</span>
+                        ))}
+                        {s.hasOutOfRange && (
+                          s.correctiveAction ? (
+                            <span style={{
+                              fontSize: "9px", fontWeight: "700", padding: "2px 6px", flexShrink: 0,
+                              background: "rgba(52,199,89,0.10)", color: "#34C759",
+                              border: "1px solid rgba(52,199,89,0.25)", borderRadius: "999px",
+                            }}>OOR ✓</span>
+                          ) : (
+                            <span style={{
+                              fontSize: "9px", fontWeight: "700", padding: "2px 6px", flexShrink: 0,
+                              background: "rgba(255,59,48,0.10)", color: "var(--danger)",
+                              border: "1px solid rgba(255,59,48,0.20)", borderRadius: "999px",
+                            }}>OOR !</span>
+                          )
+                        )}
+                        {productionPending && (
+                          <span style={{
+                            fontSize: "9px", fontWeight: "700", padding: "2px 6px", flexShrink: 0,
+                            background: "rgba(255,158,66,0.12)", color: "#B85F00",
+                            border: "1px solid rgba(255,158,66,0.28)", borderRadius: "999px",
+                          }}>Production 대기</span>
+                        )}
+                      </span>
+                      <svg width="7" height="12" viewBox="0 0 8 13" fill="none" style={{ flexShrink: 0, marginLeft: "10px" }}>
+                        <path d="M1 1l6 5.5L1 12" stroke="var(--text-3)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
           );
         })}
       </div>

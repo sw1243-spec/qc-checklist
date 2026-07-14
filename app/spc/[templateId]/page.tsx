@@ -14,7 +14,7 @@ export default async function SpcTemplatePage({ params }: { params: Promise<{ te
     include: {
       items: {
         where: { inputType: "number" }, // SPC는 숫자형만
-        orderBy: [{ section: "asc" }, { no: "asc" }],
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         include: {
           _count: { select: { values: true } },
         },

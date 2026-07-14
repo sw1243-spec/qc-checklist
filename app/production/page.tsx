@@ -164,7 +164,7 @@ export default async function ProductionPage({
             QC Daily Check Sheet Trend Chart
           </h1>
           <p style={{ fontSize: "14px", color: "var(--text-2)", marginTop: "4px" }}>
-            Stellantis Daily — Swaging Diameter &amp; Weight trends (1st · Mid · Last)
+            Daily — Swaging Diameter &amp; Weight trends (1st · Mid · Last)
           </p>
         </div>
         <PeriodSelector

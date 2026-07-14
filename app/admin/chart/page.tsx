@@ -17,7 +17,7 @@ export default async function AdminChartPage() {
         name: true,
         items: {
           where: { inputType: "number" },
-          orderBy: { no: "asc" },
+          orderBy: { sortOrder: "asc" },
           select: { id: true, no: true, section: true, characteristic: true, unit: true },
         },
       },

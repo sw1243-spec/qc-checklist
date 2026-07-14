@@ -8,8 +8,9 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { renameCompany, renameLine, renameModel, renamePartNumber, renameTemplate, renameTemplateCode } from "./actions";
+import { type DiagramTemplate, type PartNumberTemplateSource } from "./structureDiagramLinks";
 
-type T = { id: number; code: string; name: string };
+type T = DiagramTemplate;
 type PN = { id: number; code: string; label: string; templates: T[] };
 type Model = { id: number; name: string; templates: T[]; partNumbers: PN[] };
 type Line = { id: number; code: string; models: Model[] };
@@ -169,6 +170,7 @@ export default function StructureDiagram({ tree }: { tree: Company[] }) {
         for (const m of l.models) {
           const mId = `m-${m.id}`;
           const childYs: number[] = [];
+          const partNumberSources: PartNumberTemplateSource[] = [];
           // 파트넘버 (깊이 3 이상) — 파트넘버는 잎(leaf)으로 한 슬롯 차지
           if (maxDepth >= 3) {
             for (const pn of m.partNumbers) {
@@ -177,16 +179,22 @@ export default function StructureDiagram({ tree }: { tree: Company[] }) {
               childYs.push(pnY);
               add(pnId, 3, pnY, { label: pn.code, sub: pn.label || undefined, tag: "Part #", accent: COLORS.pn, onRename: (v) => rename(() => renamePartNumber(pn.id, v, pn.label)) });
               edge(mId, pnId);
-              if (maxDepth >= 4) for (const t of pn.templates) linkTmpl(t, pnId, pnY);
+              if (maxDepth >= 4) partNumberSources.push({ sourceId: pnId, sourceY: pnY, templates: pn.templates });
             }
           }
           const mY = childYs.length ? (childYs[0] + childYs[childYs.length - 1]) / 2 : slot++ * ROW;
           modelYs.push(mY);
           add(mId, 2, mY, { label: m.name, tag: "Model", accent: COLORS.model, onRename: (v) => rename(() => renameModel(m.id, v)) });
           edge(lId, mId);
-          // 모델 직접 연결 템플릿 (파트넘버가 없을 때)
-          if (maxDepth >= 4 && m.partNumbers.length === 0) {
-            for (const t of m.templates) linkTmpl(t, mId, mY);
+          if (maxDepth >= 4) {
+            // 모델 레벨 템플릿: mY 기준 위아래로 분산 (같은 위치 겹침 방지)
+            const mtpls = m.templates;
+            const mHalf = (mtpls.length - 1) / 2;
+            mtpls.forEach((tpl, i) => linkTmpl(tpl, mId, mY + (i - mHalf) * ROW));
+            // PN 레벨 템플릿
+            for (const src of partNumberSources) {
+              for (const tpl of src.templates) linkTmpl(tpl, src.sourceId, src.sourceY);
+            }
           }
         }
         const lY = modelYs.length ? (modelYs[0] + modelYs[modelYs.length - 1]) / 2 : slot++ * ROW;

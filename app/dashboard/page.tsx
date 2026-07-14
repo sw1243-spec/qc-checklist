@@ -12,6 +12,12 @@ function ymLabel(ym: string) {
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "2-digit" }).replace(" ", " '");
 }
 
+const dashboardActionLinks = [
+  { href: "/spc", label: "SPC Analysis" },
+  { href: "/production", label: "Trend Chart" },
+  { href: "/status", label: "Periodic Checks Status" },
+] as const;
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -269,24 +275,19 @@ export default async function DashboardPage({
       <div className="fade-up" style={{ marginBottom: "28px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
         <div>
           <Link href="/" style={{ fontSize: "13px", color: "var(--accent)", textDecoration: "none" }}>← Home</Link>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "12px", marginTop: "16px" }}>
             <h1 style={{ fontSize: "28px", fontWeight: "700", letterSpacing: "-0.025em", color: "var(--text-1)" }}>
               Dashboard
             </h1>
-            <Link href="/spc" style={{
-              fontSize: "12px", fontWeight: "600", padding: "5px 12px",
-              background: "var(--panel)", border: "1px solid var(--border)",
-              borderRadius: "8px", color: "var(--accent)", textDecoration: "none",
-            }}>
-              SPC Analysis →
-            </Link>
-            <Link href="/production" style={{
-              fontSize: "12px", fontWeight: "600", padding: "5px 12px",
-              background: "var(--panel)", border: "1px solid var(--border)",
-              borderRadius: "8px", color: "var(--accent)", textDecoration: "none",
-            }}>
-              Trend Chart →
-            </Link>
+            {dashboardActionLinks.map((link) => (
+              <Link key={link.href} href={link.href} style={{
+                fontSize: "12px", fontWeight: "600", padding: "5px 12px",
+                background: "var(--panel)", border: "1px solid var(--border)",
+                borderRadius: "8px", color: "var(--accent)", textDecoration: "none",
+              }}>
+                {link.label} →
+              </Link>
+            ))}
           </div>
         </div>
         {/* Period dropdown */}
@@ -454,7 +455,7 @@ export default async function DashboardPage({
                   <div style={{ position: "relative", height: "5px", background: "var(--panel)", borderRadius: "99px", overflow: "hidden" }}>
                     <div style={{
                       position: "absolute", left: 0, top: 0, bottom: 0,
-                      width: `${Math.round((item.count / maxCount) * 100)}%`,
+                      width: `${maxCount > 0 ? Math.round((item.count / maxCount) * 100) : 0}%`,
                       background: i === 0 ? "var(--danger)" : "rgba(255,59,48,0.5)",
                       borderRadius: "99px",
                     }} />

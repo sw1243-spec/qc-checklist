@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -46,6 +47,7 @@ next-env.d.ts
 # local storage (passwords + uploaded photos = user data, not for git)
 /storage/config.json
 /storage/attachments/
+/storage/references/
 
 # config 데이터 스냅샷 (사업 데이터 — git 제외, 서버엔 별도 전달)
 config-export.json
@@ -58,3 +60,18 @@ config-export.json
 /.omo/
 /.omx/
 /.claude/
+
+# 임시 파일 / 벤더 바이너리 (배포·저장소 대상 아님)
+/tmp/
+
+# 사내 ERP 문서 (기밀 — 저장소 제외, 로컬에만 유지)
+/ERP Spec & Diagram/
+/erp query/
+
+# 실제 사업 데이터 (고객사·파트넘버·공차 — 기밀). 저장소엔 익명 데모 seed만 포함.
+/prisma/seed.real.ts
+/scripts/import-error-proof.ts
+/scripts/import-sop-templates.ts
+/scripts/import-vw-machine.ts
+/scripts/inspect-excel.ts
+/scripts/link-grease-template.ts

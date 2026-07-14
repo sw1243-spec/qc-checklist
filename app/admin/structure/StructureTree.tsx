@@ -6,8 +6,6 @@ import {
   renameCompany, renameLine, renameModel, renamePartNumber,
   addCompany, addLine, addModel, addPartNumber,
   delCompany, delLine, delModel, delPartNumber,
-  linkTemplateModel, unlinkTemplateModel,
-  linkTemplatePartNumber, unlinkTemplatePartNumber,
 } from "./actions";
 
 type T = { id: number; code: string; name: string };
@@ -16,7 +14,7 @@ type Model = { id: number; name: string; templates: T[]; partNumbers: PN[] };
 type Line = { id: number; code: string; models: Model[] };
 type Company = { id: number; code: string; name: string; lines: Line[] };
 
-export default function StructureTree({ tree, allTemplates }: { tree: Company[]; allTemplates: T[] }) {
+export default function StructureTree({ tree }: { tree: Company[] }) {
   const router = useRouter();
   const [pending, start] = useTransition();
 
@@ -60,22 +58,7 @@ export default function StructureTree({ tree, allTemplates }: { tree: Company[];
                     onDelete={() => confirm(`Delete model "${m.name}"?`) && run(() => delModel(m.id))}
                   />
 
-                  {/* 모델 레벨 템플릿: 파트넘버가 없을 때만 직접 관리.
-                      파트넘버가 있으면 진입은 파트넘버 템플릿으로 자동 처리되므로 숨김. */}
-                  {m.partNumbers.length === 0 ? (
-                    <TemplateChips
-                      templates={m.templates}
-                      allTemplates={allTemplates}
-                      onLink={(tid) => run(() => linkTemplateModel(m.id, tid))}
-                      onUnlink={(tid) => run(() => unlinkTemplateModel(m.id, tid))}
-                    />
-                  ) : (
-                    <p style={{ fontSize: "11px", color: "var(--text-3)", marginLeft: "60px", marginTop: "3px", marginBottom: "3px", fontStyle: "italic" }}>
-                      Templates managed per part number below
-                    </p>
-                  )}
-
-                  {/* Part Numbers */}
+                      {/* Part Numbers */}
                   {m.partNumbers.map((pn) => (
                     <div key={pn.id} style={{ marginLeft: "16px", borderLeft: "1px solid var(--border)", paddingLeft: "14px", marginTop: "6px" }}>
                       <Row
@@ -85,15 +68,9 @@ export default function StructureTree({ tree, allTemplates }: { tree: Company[];
                         onSave={(v) => run(() => renamePartNumber(pn.id, v, pn.label))}
                         onDelete={() => confirm(`Delete part number "${pn.code}"?`) && run(() => delPartNumber(pn.id))}
                       />
-                      <TemplateChips
-                        templates={pn.templates}
-                        allTemplates={allTemplates}
-                        onLink={(tid) => run(() => linkTemplatePartNumber(pn.id, tid))}
-                        onUnlink={(tid) => run(() => unlinkTemplatePartNumber(pn.id, tid))}
-                      />
                     </div>
                   ))}
-                  <AddForm fields={[{ key: "code", ph: "Part # (e.g. 68259567AA)" }]} label="+ Part Number"
+                  <AddForm fields={[{ key: "code", ph: "Part # (e.g. PN-B-001)" }]} label="+ Part Number"
                     onAdd={(v) => run(() => addPartNumber(m.id, v.code, ""))} />
                 </div>
               ))}
@@ -171,54 +148,6 @@ function Row({ depth, tag, value, sub, color, onSave, onDelete }: {
       >
         Delete
       </button>
-    </div>
-  );
-}
-
-// ── 템플릿 칩 + 연결 드롭다운 ────────────────────────────────
-function TemplateChips({ templates, allTemplates, onLink, onUnlink }: {
-  templates: T[]; allTemplates: T[]; onLink: (tid: number) => void; onUnlink: (tid: number) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const linkedIds = new Set(templates.map((t) => t.id));
-  const available = allTemplates.filter((t) => !linkedIds.has(t.id));
-
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center", marginLeft: "60px", marginTop: "3px", marginBottom: "3px" }}>
-      {templates.map((t) => (
-        <span key={t.id} style={{
-          display: "inline-flex", alignItems: "center", gap: "5px",
-          fontSize: "11px", fontWeight: "600", padding: "3px 8px",
-          background: "rgba(0,136,255,0.08)", color: "var(--accent)",
-          border: "1px solid rgba(0,136,255,0.18)", borderRadius: "999px",
-        }}>
-          {t.name}
-          <button onClick={() => onUnlink(t.id)} title="Unlink" style={{
-            background: "none", border: "none", cursor: "pointer", color: "var(--accent)",
-            fontSize: "13px", lineHeight: 1, padding: 0,
-          }}>×</button>
-        </span>
-      ))}
-
-      {adding ? (
-        <select
-          autoFocus
-          onChange={(e) => { const v = Number(e.target.value); if (v) onLink(v); setAdding(false); }}
-          onBlur={() => setAdding(false)}
-          style={{ fontSize: "11px", padding: "3px 6px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--panel)", fontFamily: "inherit" }}
-        >
-          <option value="">Select template…</option>
-          {available.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.code})</option>)}
-        </select>
-      ) : (
-        available.length > 0 && (
-          <button onClick={() => setAdding(true)} style={{
-            fontSize: "11px", fontWeight: "500", padding: "3px 8px",
-            background: "none", color: "var(--text-3)",
-            border: "1px dashed var(--border)", borderRadius: "999px", cursor: "pointer", fontFamily: "inherit",
-          }}>+ Template</button>
-        )
-      )}
     </div>
   );
 }

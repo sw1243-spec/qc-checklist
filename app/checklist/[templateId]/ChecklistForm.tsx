@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { submitChecklist } from "@/app/actions";
+import type { DeviceDepartment } from "@/lib/device";
 
 type SpecRange = {
   lineId: number | null;
@@ -25,6 +26,8 @@ type CheckItem = {
   unit: string | null;
   nullable: boolean;
   department: string | null;
+  referenceImage: string | null;
+  note: string | null;
   specRanges: SpecRange[];
 };
 
@@ -48,6 +51,15 @@ type Props = {
   leNames: string[];
   qcNames: string[];
   svNames: string[];
+  lockedDepartment?: DeviceDepartment;
+  initialValues?: Record<string, string>;
+  initialMeta?: {
+    shift1LE: string; shift2LE: string; shift1QC: string; shift2QC: string;
+    shift1SV: string; shift2SV: string;
+    shift3LE: string; shift3QC: string; shift3SV: string;
+    partNumberBuild: string;
+  } | null;
+  shiftName?: string;
 };
 
 type ValueKey = `${number}-${number}-${number}`;
@@ -79,7 +91,7 @@ function isOutOfRange(value: string, spec: SpecRange | null): boolean {
 
 /* F-pattern: OP col + item col + spec + samples */
 const grid = (n: number) =>
-  `52px minmax(160px, 3fr) 120px ${Array(n).fill("minmax(68px, 1fr)").join(" ")}`;
+  `40px 60px minmax(150px, 2.6fr) minmax(96px, 1.2fr) 120px ${Array(n).fill("minmax(68px, 1fr)").join(" ")}`;
 
 const COL = "1px solid rgba(0,0,0,0.12)";
 const ROW = "1px solid rgba(0,0,0,0.08)";
@@ -88,7 +100,8 @@ export default function ChecklistForm({
   templateId, lineId, lineCode, modelId, modelName,
   partNumberId, partNumberCode, partNumberLabel,
   templateName, note, items, shift, sampleCount, sampleLabels, autoPartNo, defaultDate,
-  leNames, qcNames, svNames,
+  leNames, qcNames, svNames, lockedDepartment,
+  initialValues, initialMeta, shiftName,
 }: Props) {
   const router = useRouter();
   const partNos = Array.from({ length: sampleCount }, (_, i) => i + 1);
@@ -96,24 +109,68 @@ export default function ChecklistForm({
 
   // 부서별 입력 분담: 부서가 지정된 항목이 하나라도 있으면 Quality/Production 토글 표시
   const hasDepartments = items.some((i) => i.department === "QC" || i.department === "PROD");
-  const [dept, setDept] = useState<"QC" | "PROD">("QC");
-  // 잠금: 부서 토글이 켜져 있고 + 항목에 부서가 지정됐고 + 현재 선택 부서와 다르면 잠금
-  const isItemLocked = (item: CheckItem) =>
-    hasDepartments && !!item.department && item.department !== dept;
+  const [dept, setDept] = useState<DeviceDepartment>(lockedDepartment ?? "QC");
+  // 잠금 규칙 (부서 토글이 켜진 경우):
+  //  - 부서 지정 항목: 현재 선택 부서와 다르면 잠금
+  //  - 공통 항목(부서 미지정): Quality(QC) 담당으로 귀속 → Production 모드에선 잠금
+  //    (한 부서가 책임지게 해야 부서별 제출이 서로 안 덮어씀)
+  const isItemLocked = (item: CheckItem) => {
+    if (!hasDepartments) return false;
+    if (!item.department) return dept === "PROD";
+    return item.department !== dept;
+  };
 
   const [date, setDate] = useState(defaultDate);
-  const [meta, setMeta] = useState({
+  // 이어 작성: 오늘 기존 제출값이 있으면 미리 채움 (1st 후 Mid·Last 추가용)
+  const [meta, setMeta] = useState(initialMeta ?? {
     shift1LE: "", shift2LE: "", shift1QC: "", shift2QC: "", shift1SV: "", shift2SV: "",
+    shift3LE: "", shift3QC: "", shift3SV: "",
     partNumberBuild: partNumberLabel ?? partNumberCode ?? "",
   });
-  const [values, setValues] = useState<Record<ValueKey, string>>({});
+  const [values, setValues] = useState<Record<ValueKey, string>>(
+    (initialValues as Record<ValueKey, string> | undefined) ?? {},
+  );
   const [modalType, setModalType] = useState<"oor" | "empty" | null>(null);
   const [pendingSubmit, setPendingSubmit] = useState<(() => void) | null>(null);
+  const [imgModal, setImgModal] = useState<number | null>(null); // 참조 사진 모달 (itemId)
 
   const setValue = (itemId: number, s: number, partNo: number, val: string) =>
     setValues((prev) => ({ ...prev, [`${itemId}-${s}-${partNo}`]: val }));
   const getValue = (itemId: number, s: number, partNo: number): string =>
     values[`${itemId}-${s}-${partNo}` as ValueKey] ?? "";
+
+  // ── 작성 내용 자동 백업 (네트워크 끊김·새로고침·앱 종료 대비) ──
+  const draftKey = `qc_draft_v1_${templateId}_${lineId}_${modelId}_${partNumberId ?? "none"}_${shift}`;
+  const restored = useRef(false);
+  // 복원 (마운트 1회, 12시간 이내 초안만)
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const timer = window.setTimeout(() => {
+      try {
+        const raw = localStorage.getItem(draftKey);
+        if (raw) {
+          const d = JSON.parse(raw);
+          if (d.savedAt && Date.now() - d.savedAt < 12 * 3600 * 1000) {
+            if (d.values) setValues(d.values);
+            if (d.meta) setMeta((m) => ({ ...m, ...d.meta }));
+            if (d.date) setDate(d.date);
+          } else {
+            localStorage.removeItem(draftKey); // 오래된 초안 폐기
+          }
+        }
+      } catch { /* ignore */ }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [draftKey]);
+  // 변경 시 자동 저장
+  useEffect(() => {
+    if (!restored.current) return;
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({ values, meta, date, savedAt: Date.now() }));
+    } catch { /* storage full/unavailable */ }
+  }, [values, meta, date, draftKey]);
+  const clearDraft = () => { try { localStorage.removeItem(draftKey); } catch { /* */ } };
 
   // 섹션은 no 순서로 처음 등장한 순서대로 (DB 쿼리가 no asc 정렬)
   const sections = [...new Set(items.map((i) => i.section))];
@@ -122,7 +179,8 @@ export default function ChecklistForm({
   //  - 컬럼 전체가 빈칸이면 "이번엔 안 함"으로 통과
   //  - 필수 항목이 하나라도 채워진 컬럼은 그 컬럼의 필수 항목 전부 채워야 함
   //  - 모든 컬럼이 빈칸이면 빈 시트이므로 경고
-  const requiredItems = items.filter((item) => !item.nullable);
+  // 현재 부서에서 입력 가능한(잠기지 않은) 필수 항목만 — 다른 부서 항목 빈칸으로 제출이 막히지 않게
+  const requiredItems = items.filter((item) => !item.nullable && !isItemLocked(item));
 
   // 해당 컬럼(partNo)에 필수 항목 값이 하나라도 있으면 "사용중" 컬럼
   function isColumnStarted(pn: number) {
@@ -140,13 +198,16 @@ export default function ChecklistForm({
   }
   function hasOutOfRangeAny() {
     return items.some((item) => {
+      if (isItemLocked(item)) return false; // 다른 부서 항목은 이번 제출 대상 아님
       if (item.inputType !== "number") return false;
       const spec = getSpec(item, lineId, modelId, partNumberId);
       return partNos.some((pn) => isOutOfRange(getValue(item.id, shift, pn), spec));
     });
   }
+  // 이번 제출에 보낼 값 — 부서 분담 시 현재 부서 항목만 (다른 부서 값은 서버에서 보존됨)
   function buildVals() {
-    return items.flatMap((item) =>
+    const target = hasDepartments ? items.filter((i) => !isItemLocked(i)) : items;
+    return target.flatMap((item) =>
       partNos.map((partNo) => ({ itemId: item.id, shift, partNo, valueText: getValue(item.id, shift, partNo) }))
     );
   }
@@ -159,17 +220,38 @@ export default function ChecklistForm({
       };
       const result = await submitChecklist(templateId, lineId, modelId, date, shift, resolvedMeta, buildVals());
       if (result.ok) {
+        clearDraft(); // 제출 성공 → 로컬 초안 삭제
         router.push(`/submission/${result.submissionId}`);
       } else {
         alert("Save failed: " + result.error);
         setIsPending(false);
       }
     } catch {
-      alert("An error occurred. Please try again.");
+      // 네트워크/서버 오류 — 작성 내용은 이 기기에 보관됨 (새로고침해도 복원)
+      alert("Network error. Your entries are saved on this device — check your connection and press Submit again.");
       setIsPending(false);
     }
   }
   function handleSubmit() {
+    const le = shift === 1 ? meta.shift1LE : shift === 2 ? meta.shift2LE : meta.shift3LE;
+    const qc = shift === 1 ? meta.shift1QC : shift === 2 ? meta.shift2QC : meta.shift3QC;
+    const sv = shift === 1 ? meta.shift1SV : shift === 2 ? meta.shift2SV : meta.shift3SV;
+    if (hasDepartments) {
+      // 부서 분담: 제출하는 부서 담당만 필수 (Quality→QC 검사자, Production→라인리더)
+      if (dept === "QC" && !qc.trim()) { alert("Please select the QC Inspector before submitting."); return; }
+      if (dept === "PROD" && !le.trim()) { alert("Please select the Line Leader before submitting."); return; }
+    } else {
+      // 부서 분담 없음: 3명 모두 필수
+      if (!le.trim() || !qc.trim() || !sv.trim()) {
+        alert("Please select the Line Leader, QC Inspector, and QC Supervisor before submitting.");
+        return;
+      }
+    }
+    // 부서 제출 확인 — 다른 부서를 실수로 채워 제출하는 것 방지
+    if (hasDepartments) {
+      const deptName = dept === "QC" ? "Quality" : "Production";
+      if (!confirm(`Submit the ${deptName} items for this check sheet?`)) return;
+    }
     const empty = hasEmpty();
     // 빈칸이 있으면 저장 차단 (확인 후 진행 불가)
     if (empty) { setModalType("empty"); return; }
@@ -227,12 +309,17 @@ export default function ChecklistForm({
               letterSpacing: "0.04em",
               textTransform: "uppercase" as const,
             }}>
-              {shift === 1 ? "1st Shift" : "2nd Shift"}
+              {shiftName ?? (shift === 1 ? "1st Shift" : shift === 2 ? "2nd Shift" : "3rd Shift")}
             </span>
           </div>
 
           {/* 부서별 입력 토글 (부서 지정 항목이 있을 때만) */}
-          {hasDepartments && (
+          {hasDepartments && lockedDepartment && (
+            <div style={{ marginTop: "16px", display: "inline-flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "9999px", background: "var(--panel)", border: "1px solid var(--border)", color: "var(--text-2)", fontSize: "12px", fontWeight: 700 }}>
+              This tablet is locked to {lockedDepartment === "QC" ? "Quality" : "Production"}
+            </div>
+          )}
+          {hasDepartments && !lockedDepartment && (
             <div style={{ marginTop: "16px" }}>
               <p style={{ fontSize: "12px", color: "var(--text-3)", marginBottom: "8px" }}>
                 Select your department — only your assigned items are editable.
@@ -281,36 +368,26 @@ export default function ChecklistForm({
               />
             </Field>
           )}
-          {/* datalist for autocomplete */}
-          <datalist id="dl-le">{leNames.map((n) => <option key={n} value={n} />)}</datalist>
-          <datalist id="dl-qc">{qcNames.map((n) => <option key={n} value={n} />)}</datalist>
-          <datalist id="dl-sv">{svNames.map((n) => <option key={n} value={n} />)}</datalist>
-
-          {shift === 1 ? (
-            <>
-              <Field label="1st Shift — Line Leader">
-                <input value={meta.shift1LE} onChange={(e) => setMeta((m) => ({ ...m, shift1LE: e.target.value }))} className="apple-input" placeholder="Name" list="dl-le" />
-              </Field>
-              <Field label="1st Shift — QC Inspector">
-                <input value={meta.shift1QC} onChange={(e) => setMeta((m) => ({ ...m, shift1QC: e.target.value }))} className="apple-input" placeholder="Name" list="dl-qc" />
-              </Field>
-              <Field label="1st Shift — QC Supervisor">
-                <input value={meta.shift1SV} onChange={(e) => setMeta((m) => ({ ...m, shift1SV: e.target.value }))} className="apple-input" placeholder="Name" list="dl-sv" />
-              </Field>
-            </>
-          ) : (
-            <>
-              <Field label="2nd Shift — Line Leader">
-                <input value={meta.shift2LE} onChange={(e) => setMeta((m) => ({ ...m, shift2LE: e.target.value }))} className="apple-input" placeholder="Name" list="dl-le" />
-              </Field>
-              <Field label="2nd Shift — QC Inspector">
-                <input value={meta.shift2QC} onChange={(e) => setMeta((m) => ({ ...m, shift2QC: e.target.value }))} className="apple-input" placeholder="Name" list="dl-qc" />
-              </Field>
-              <Field label="2nd Shift — QC Supervisor">
-                <input value={meta.shift2SV} onChange={(e) => setMeta((m) => ({ ...m, shift2SV: e.target.value }))} className="apple-input" placeholder="Name" list="dl-sv" />
-              </Field>
-            </>
-          )}
+          {/* shift에 맞는 작업자 필드 — 시프트 이름은 shiftName prop */}
+          {(() => {
+            const label = shiftName ?? (shift === 1 ? "1st Shift" : shift === 2 ? "2nd Shift" : "3rd Shift");
+            const leKey = shift === 1 ? "shift1LE" : shift === 2 ? "shift2LE" : "shift3LE";
+            const qcKey = shift === 1 ? "shift1QC" : shift === 2 ? "shift2QC" : "shift3QC";
+            const svKey = shift === 1 ? "shift1SV" : shift === 2 ? "shift2SV" : "shift3SV";
+            return (
+              <>
+                <Field label={`${label} — Line Leader`}>
+                  <WorkerSelect names={leNames} value={meta[leKey as keyof typeof meta] as string} onChange={(v) => setMeta((m) => ({ ...m, [leKey]: v }))} />
+                </Field>
+                <Field label={`${label} — QC Inspector`}>
+                  <WorkerSelect names={qcNames} value={meta[qcKey as keyof typeof meta] as string} onChange={(v) => setMeta((m) => ({ ...m, [qcKey]: v }))} />
+                </Field>
+                <Field label={`${label} — QC Supervisor`}>
+                  <WorkerSelect names={svNames} value={meta[svKey as keyof typeof meta] as string} onChange={(v) => setMeta((m) => ({ ...m, [svKey]: v }))} />
+                </Field>
+              </>
+            );
+          })()}
 
           {/* 관리자 주의사항 노트 (오른쪽 하단 빈 칸) */}
           {note && (
@@ -344,8 +421,10 @@ export default function ChecklistForm({
               {/* Column headers — Auralis label-caps on panel bg */}
               <div style={{ display: "grid", gridTemplateColumns: g, background: "var(--panel)", borderBottom: `1px solid var(--border)` }}>
                 {[
-                  { label: "OP", align: "center" as const },
+                  { label: "No.", align: "center" as const },
+                  { label: "Op#", align: "center" as const },
                   { label: "Measuring Item", align: "left" as const },
+                  { label: "Method", align: "left" as const },
                   { label: "Spec", align: "center" as const },
                   ...sampleLabels.map((l, i) => ({ label: l, align: "center" as const, isLast: i === sampleLabels.length - 1 })),
                 ].map((col, ci) => (
@@ -355,7 +434,7 @@ export default function ChecklistForm({
                     color: "var(--text-3)",
                     letterSpacing: "0.08em", textTransform: "uppercase",
                     textAlign: col.align,
-                    borderRight: ci < sampleCount + 2 ? COL : "none",
+                    borderRight: ci < sampleCount + 4 ? COL : "none",
                     lineHeight: "1.3",
                     whiteSpace: "nowrap",
                   }}>
@@ -388,19 +467,24 @@ export default function ChecklistForm({
                       opacity: locked ? 0.45 : 1,
                     }}
                   >
-                    {/* OP column */}
+                    {/* No. */}
                     <div style={{
                       padding: "13px 8px", borderRight: COL,
-                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "2px",
+                      display: "flex", alignItems: "center", justifyContent: "center",
                     }}>
-                      <span style={{ fontSize: "10px", color: "var(--text-3)", fontFamily: "monospace", fontWeight: "700" }}>
-                        #{item.no}
+                      <span style={{ fontSize: "11px", color: "var(--text-3)", fontFamily: "monospace", fontWeight: "700" }}>
+                        {item.no}
                       </span>
-                      {item.opNo && (
-                        <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--accent)", fontFamily: "monospace", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
-                          {item.opNo}
-                        </span>
-                      )}
+                    </div>
+
+                    {/* Op# */}
+                    <div style={{
+                      padding: "13px 8px", borderRight: COL,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      {item.opNo
+                        ? <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--accent)", fontFamily: "monospace", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{item.opNo}</span>
+                        : <span style={{ color: "var(--text-3)" }}>—</span>}
                     </div>
 
                     {/* Item name */}
@@ -409,12 +493,52 @@ export default function ChecklistForm({
                         {item.characteristic}
                         {item.department === "QC" && <span style={{ fontSize: "9px", fontWeight: 700, padding: "1px 6px", borderRadius: "999px", background: "rgba(125,155,118,0.18)", color: "#5a7a52" }}>Quality</span>}
                         {item.department === "PROD" && <span style={{ fontSize: "9px", fontWeight: 700, padding: "1px 6px", borderRadius: "999px", background: "rgba(107,140,174,0.18)", color: "#4a6a8e" }}>Production</span>}
+                        {item.referenceImage && (
+                          <button
+                            type="button"
+                            onClick={() => setImgModal(item.id)}
+                            title="View reference photo"
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: "3px",
+                              fontSize: "10px", fontWeight: 600, padding: "2px 8px",
+                              borderRadius: "999px", cursor: "pointer",
+                              background: "rgba(0,113,227,0.10)", color: "#0071e3",
+                              border: "1px solid rgba(0,113,227,0.25)", fontFamily: "inherit",
+                            }}
+                          >
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/>
+                            </svg>
+                            Photo
+                          </button>
+                        )}
                       </div>
                       {item.unit && (
                         <div style={{ fontSize: "11px", color: "var(--text-3)", marginTop: "2px" }}>
                           ({item.unit})
                         </div>
                       )}
+                      {item.note && (
+                        <div style={{
+                          fontSize: "11px", color: "#b26b00",
+                          background: "rgba(255,159,10,0.08)",
+                          border: "1px solid rgba(255,159,10,0.22)",
+                          borderRadius: "5px", padding: "4px 8px", marginTop: "6px",
+                          lineHeight: 1.4, whiteSpace: "pre-wrap",
+                        }}>
+                          ⚠ {item.note}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Method */}
+                    <div style={{
+                      padding: "13px 10px", borderRight: COL,
+                      display: "flex", alignItems: "center",
+                      fontSize: "12px", color: "var(--text-2)", lineHeight: "1.35",
+                      wordBreak: "break-word",
+                    }}>
+                      {item.method || <span style={{ color: "var(--text-3)" }}>—</span>}
                     </div>
 
                     {/* Spec */}
@@ -424,10 +548,17 @@ export default function ChecklistForm({
                       fontSize: "11px", color: "var(--text-2)", textAlign: "center",
                       lineHeight: "1.4", wordBreak: "break-word",
                     }}>
-                      {spec?.label
-                        ?? (spec && (spec.minVal !== null || spec.maxVal !== null)
-                          ? `${spec.minVal ?? ""}${spec.minVal !== null && spec.maxVal !== null ? " ~ " : ""}${spec.maxVal ?? ""}${item.unit ? ` ${item.unit}` : ""}`
-                          : item.inputType === "ok_ng" ? "OK / NG" : "—")}
+                      {(() => {
+                        if (!spec) return item.inputType === "ok_ng" ? "OK / NG" : "—";
+                        const hasRange = spec.minVal !== null || spec.maxVal !== null;
+                        if (hasRange) {
+                          const sep = spec.minVal !== null && spec.maxVal !== null ? " ~ " : "";
+                          const range = `${spec.minVal ?? ""}${sep}${spec.maxVal ?? ""}${item.unit ? ` ${item.unit}` : ""}`;
+                          return spec.label ? `${range}  ·  ${spec.label}` : range;
+                        }
+                        if (spec.label) return spec.label;
+                        return item.inputType === "ok_ng" ? "OK / NG" : "—";
+                      })()}
                     </div>
 
                     {/* Inputs */}
@@ -479,6 +610,25 @@ export default function ChecklistForm({
         ) : "Submit"}
       </button>
       </div>
+
+      {/* ── 참조 사진 모달 ──────────────────────────── */}
+      {imgModal !== null && (
+        <div
+          onClick={() => setImgModal(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 100, padding: "24px", cursor: "zoom-out",
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/reference/${imgModal}`}
+            alt="Reference"
+            style={{ maxWidth: "96%", maxHeight: "92%", objectFit: "contain", borderRadius: "12px", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}
+          />
+        </div>
+      )}
 
       {/* ── Modal ──────────────────────────────────── */}
       {modalType && (
@@ -564,6 +714,23 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+// 등록된 작업자만 고르는 드롭다운 (자유 입력 방지)
+// 기존 자유입력 값이 목록에 없으면 그 값도 보존해서 표시
+function WorkerSelect({ names, value, onChange }: { names: string[]; value: string; onChange: (v: string) => void }) {
+  const opts = value && !names.includes(value) ? [value, ...names] : names;
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="apple-input"
+      style={{ cursor: "pointer" }}
+    >
+      <option value="">— Select —</option>
+      {opts.map((n) => <option key={n} value={n}>{n}</option>)}
+    </select>
+  );
+}
+
 function ItemInput({ inputType, nullable, value, outOfRange, onChange, disabled }: {
   inputType: string; nullable: boolean; value: string; outOfRange: boolean; onChange: (v: string) => void; disabled?: boolean;
 }) {
@@ -606,11 +773,13 @@ function ItemInput({ inputType, nullable, value, outOfRange, onChange, disabled 
       </select>
     );
   }
+  const isText = inputType === "text";
   return (
     <input
-      type="text" inputMode="decimal" disabled={disabled}
+      type="text" inputMode={isText ? "text" : "decimal"} disabled={disabled}
       value={value} onChange={(e) => onChange(e.target.value)}
-      style={base} placeholder={nullable ? "N/A" : ""}
+      style={isText ? { ...base, textAlign: "left", fontSize: "12px" } : base}
+      placeholder={nullable ? "N/A" : ""}
     />
   );
 }

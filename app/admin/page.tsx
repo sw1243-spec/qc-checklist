@@ -85,6 +85,21 @@ export default async function AdminPage() {
           </svg>
         </Link>
 
+        <Link href="/SWJ/shifts" className="liquid-glass" style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "20px 24px", textDecoration: "none",
+        }}>
+          <div>
+            <div style={{ fontSize: "15px", fontWeight: "600", color: "var(--text-1)" }}>Shifts</div>
+            <div style={{ fontSize: "13px", color: "var(--text-3)", marginTop: "3px" }}>
+              Activate shifts &amp; set deadlines
+            </div>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </Link>
+
         <Link href="/SWJ/workers" className="liquid-glass" style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "20px 24px", textDecoration: "none",

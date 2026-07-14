@@ -8,9 +8,10 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const defaultFrom = () => { const d = new Date(); d.setDate(d.getDate() - 29); d.setHours(0, 0, 0, 0); return d; };
   // 잘못된 날짜 파라미터(Invalid Date)는 기본값으로 폴백 — 쿼리 크래시 방지
-  const fromParam = sp.get("from") ? new Date(sp.get("from")!) : defaultFrom();
+  // 'T00:00:00'을 붙여 로컬 자정으로 파싱 (UTC 파싱 시 타임존 어긋남 방지, history 페이지와 동일)
+  const fromParam = sp.get("from") ? new Date(sp.get("from")! + "T00:00:00") : defaultFrom();
   const from = isNaN(fromParam.getTime()) ? defaultFrom() : fromParam;
-  const toParam = sp.get("to") ? new Date(sp.get("to")!) : new Date();
+  const toParam = sp.get("to") ? new Date(sp.get("to")! + "T00:00:00") : new Date();
   const to = isNaN(toParam.getTime()) ? new Date() : toParam;
   const lineId   = sp.get("line")    ? Number(sp.get("line"))    : undefined;
   const company  = sp.get("company") ?? undefined;
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest) {
       correctiveAction: true,
       values: {
         include: { item: true },
-        orderBy: [{ item: { no: "asc" } }, { shift: "asc" }, { partNo: "asc" }],
+        orderBy: [{ item: { sortOrder: "asc" } }, { shift: "asc" }, { partNo: "asc" }],
       },
     },
     orderBy: [{ date: "desc" }, { id: "desc" }],
@@ -54,8 +55,9 @@ export async function GET(req: NextRequest) {
     { header: "Shift 1 QC",    key: "s1qc",         width: 14 },
     { header: "Shift 2 LE",    key: "s2le",         width: 14 },
     { header: "Shift 2 QC",    key: "s2qc",         width: 14 },
+    { header: "Shift 3 LE",    key: "s3le",         width: 14 },
+    { header: "Shift 3 QC",    key: "s3qc",         width: 14 },
     { header: "OOR",           key: "oor",          width: 8 },
-    { header: "CA Cause",      key: "caCause",      width: 24 },
     { header: "CA Action",     key: "caAction",     width: 24 },
     { header: "CA Resolved By",key: "caResolvedBy", width: 16 },
   ];
@@ -82,8 +84,9 @@ export async function GET(req: NextRequest) {
       s1qc:        s.shift1QC ?? "",
       s2le:        s.shift2LE ?? "",
       s2qc:        s.shift2QC ?? "",
+      s3le:        s.shift3LE ?? "",
+      s3qc:        s.shift3QC ?? "",
       oor:         s.hasOutOfRange ? "OOR" : "Pass",
-      caCause:     s.correctiveAction?.cause ?? "",
       caAction:    s.correctiveAction?.action ?? "",
       caResolvedBy:s.correctiveAction?.resolvedBy ?? "",
     });

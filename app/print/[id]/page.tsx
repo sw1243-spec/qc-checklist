@@ -17,7 +17,7 @@ export default async function PrintPage({ params }: { params: Promise<{ id: stri
       correctiveAction: true,
       values: {
         include: { item: { include: { specRanges: true } } },
-        orderBy: [{ item: { no: "asc" } }, { partNo: "asc" }],
+        orderBy: [{ item: { sortOrder: "asc" } }, { partNo: "asc" }],
       },
     },
   });
@@ -28,29 +28,55 @@ export default async function PrintPage({ params }: { params: Promise<{ id: stri
   const vals          = submission.values.filter((v) => v.shift === shift);
   const partNumberId  = submission.partNumberId ?? undefined;
 
-  function getSpecLabel(item: { specRanges: { partNumberId: number | null; lineId: number | null; modelId: number | null; label: string | null }[]; inputType: string }): string {
+  type SpecLike = { partNumberId: number | null; lineId: number | null; modelId: number | null; label: string | null; minVal: number | null; maxVal: number | null };
+  function getSpec(item: { specRanges: SpecLike[] }): SpecLike | null {
     const sr = item.specRanges;
-    const spec =
+    return (
       (partNumberId ? sr.find((s) => s.partNumberId === partNumberId) : null) ??
       sr.find((s) => !s.partNumberId && s.lineId === submission!.lineId && s.modelId === submission!.modelId) ??
       sr.find((s) => !s.partNumberId && s.lineId === submission!.lineId && s.modelId === null) ??
       sr.find((s) => !s.partNumberId && s.lineId === null && s.modelId === submission!.modelId) ??
       sr.find((s) => !s.partNumberId && s.lineId === null && s.modelId === null) ??
-      null;
-    return spec?.label ?? (item.inputType === "ok_ng" ? "OK / Not OK" : "—");
+      null
+    );
+  }
+  function getSpecLabel(item: { specRanges: SpecLike[]; inputType: string }): string {
+    const spec = getSpec(item);
+    if (!spec) return item.inputType === "ok_ng" ? "OK / Not OK" : "—";
+    const hasRange = spec.minVal !== null || spec.maxVal !== null;
+    if (hasRange) {
+      const sep = spec.minVal !== null && spec.maxVal !== null ? " ~ " : "";
+      const unit = (item as { unit?: string | null }).unit;
+      const range = `${spec.minVal ?? ""}${sep}${spec.maxVal ?? ""}${unit ? ` ${unit}` : ""}`;
+      return spec.label ? `${range}  ·  ${spec.label}` : range;
+    }
+    if (spec.label) return spec.label;
+    return item.inputType === "ok_ng" ? "OK / Not OK" : "—";
+  }
+  // 재측정값 합격 판정
+  function correctedStatus(inputType: string, spec: SpecLike | null, text: string | null): "pass" | "fail" | null {
+    if (!text) return null;
+    if (inputType === "ok_ng") return text.trim().toUpperCase() === "OK" ? "pass" : "fail";
+    const num = parseFloat(text);
+    if (isNaN(num)) return null;
+    if (spec?.minVal != null && num < spec.minVal) return "fail";
+    if (spec?.maxVal != null && num > spec.maxVal) return "fail";
+    return "pass";
   }
 
   const getVal = (itemId: number, partNo: number) =>
     vals.find((v) => v.itemId === itemId && v.partNo === partNo)?.valueText ?? "";
   const isOor = (itemId: number, partNo: number) =>
     vals.find((v) => v.itemId === itemId && v.partNo === partNo)?.isOutOfRange ?? false;
+  const getCorrected = (itemId: number, partNo: number) =>
+    vals.find((v) => v.itemId === itemId && v.partNo === partNo)?.correctedText ?? "";
 
   const items    = [...new Map(vals.map((v) => [v.itemId, v.item])).values()].sort((a, b) => a.no - b.no);
   const sections = [...new Set(items.map((i) => i.section))];
 
-  const leVal  = shift === 1 ? submission.shift1LE : submission.shift2LE;
-  const qcVal  = shift === 1 ? submission.shift1QC : submission.shift2QC;
-  const svVal  = shift === 1 ? submission.shift1SV : submission.shift2SV;
+  const leVal  = shift === 1 ? submission.shift1LE : shift === 2 ? submission.shift2LE : (submission.shift3LE ?? null);
+  const qcVal  = shift === 1 ? submission.shift1QC : shift === 2 ? submission.shift2QC : (submission.shift3QC ?? null);
+  const svVal  = shift === 1 ? submission.shift1SV : shift === 2 ? submission.shift2SV : (submission.shift3SV ?? null);
   const dateStr = submission.date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
   const printedAt = new Date().toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   const ca = submission.correctiveAction;
@@ -426,9 +452,20 @@ export default async function PrintPage({ params }: { params: Promise<{ id: stri
                           const partNo = si + 1;
                           const v   = getVal(item.id, partNo);
                           const oor = isOor(item.id, partNo);
+                          const corrected = getCorrected(item.id, partNo);
+                          const cstatus = corrected ? correctedStatus(item.inputType, getSpec(item), corrected) : null;
                           return (
-                            <td key={partNo} className={`td-val${oor ? " oor" : ""}`}>
-                              {v || <span className="empty-dash">—</span>}
+                            <td key={partNo} className={`td-val${oor && !corrected ? " oor" : ""}`}>
+                              {oor && corrected ? (
+                                <span style={{ display: "inline-flex", alignItems: "baseline", gap: "4px", justifyContent: "center" }}>
+                                  <span style={{ textDecoration: "line-through", opacity: 0.5 }}>{v}</span>
+                                  <span style={{ fontWeight: 700, color: cstatus === "fail" ? "#C0241A" : "#1A7A37" }}>
+                                    {corrected}{cstatus === "fail" ? " ✕" : cstatus === "pass" ? " ✓" : ""}
+                                  </span>
+                                </span>
+                              ) : (
+                                v || <span className="empty-dash">—</span>
+                              )}
                             </td>
                           );
                         })}
@@ -442,7 +479,7 @@ export default async function PrintPage({ params }: { params: Promise<{ id: stri
         </div>
 
         {/* Corrective Action (if any) */}
-        {ca && (ca.cause || ca.action || ca.resolvedBy) && (
+        {ca && (ca.action || ca.resolvedBy) && (
           <div style={{
             marginTop: "10px",
             border: "1px solid #e6e6e6",
@@ -458,11 +495,7 @@ export default async function PrintPage({ params }: { params: Promise<{ id: stri
             }}>
               Corrective Action
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderTop: "1px solid #e6e6e6" }}>
-              <div style={{ padding: "7px 12px", borderRight: "1px solid #e6e6e6" }}>
-                <div style={{ fontSize: "6.5pt", fontWeight: "600", color: "#9B9B98", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "2px" }}>Cause</div>
-                <div style={{ fontSize: "8.5pt", color: "#111" }}>{ca.cause || "—"}</div>
-              </div>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", borderTop: "1px solid #e6e6e6" }}>
               <div style={{ padding: "7px 12px", borderRight: "1px solid #e6e6e6" }}>
                 <div style={{ fontSize: "6.5pt", fontWeight: "600", color: "#9B9B98", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "2px" }}>Action Taken</div>
                 <div style={{ fontSize: "8.5pt", color: "#111" }}>{ca.action || "—"}</div>

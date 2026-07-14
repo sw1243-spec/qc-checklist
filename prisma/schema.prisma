@@ -9,7 +9,7 @@ datasource db {
 
 model Company {
   id    Int    @id @default(autoincrement())
-  code  String @unique // "VW", "STELLANTIS"
+  code  String @unique // "CUST_A", "CUST_B"
   name  String
   lines Line[]
 }
@@ -23,6 +23,7 @@ model Line {
   specRanges  SpecRange[]
   submissions Submission[]
   workers     Worker[]
+  greaseLogs  GreaseLog[]
 
   @@unique([companyId, code])
 }
@@ -30,12 +31,13 @@ model Line {
 model Model {
   id            Int             @id @default(autoincrement())
   lineId        Int
-  name          String          // "Atlas","Taos","Tiguan","RU","WS"...
+  name          String          // "Model X1","Model X2","Assembly Y"...
   line          Line            @relation(fields: [lineId], references: [id])
   templateLinks TemplateModel[]
   submissions   Submission[]
   specRanges    SpecRange[]
   partNumbers   PartNumber[]
+  greaseLogs    GreaseLog[]
 }
 
 model PartNumber {
@@ -43,12 +45,13 @@ model PartNumber {
   modelId       Int
   templateId    Int?                  // 기존 단일 템플릿 (Deprecated, fallback용)
   code          String                // "203.B", "271.N"
-  label         String?               // "3QF.501.203.B / 204.B"
+  label         String?               // "PN-B-001 / PN-B-002"
   model         Model                 @relation(fields: [modelId], references: [id])
   template      ChecksheetTemplate?   @relation(fields: [templateId], references: [id])
   templateLinks PartNumberTemplate[]
   specRanges    SpecRange[]
   submissions   Submission[]
+  greaseLogs    GreaseLog[]
 
   @@unique([modelId, code])
 }
@@ -65,13 +68,14 @@ model PartNumberTemplate {
 
 model ChecksheetTemplate {
   id           Int             @id @default(autoincrement())
-  code         String          @unique // "19-020"
+  code         String          // "19-020"
   name         String
   version      String          // "Rev R"
   sampleCount  Int             @default(2)
   sampleLabels String          @default("P#1,P#2")
   sortOrder    Int             @default(0) // 표시 순서 (드래그로 조정)
   note         String?         // 관리자 주의사항 메모 (폼 헤더에 표시)
+  responsible  String?         // 담당 부서 마킹 (CSV: "QC", "PROD", "QC,PROD") — 체크시트 선택 화면에 뱃지로 표시
   items            CheckItem[]
   modelLinks       TemplateModel[]
   partNumbers      PartNumber[]
@@ -102,6 +106,9 @@ model CheckItem {
   unit           String?
   nullable       Boolean            @default(false)
   department     String?            // "QC" | "PROD" | null(공통) — 부서별 입력 분담
+  sortOrder      Int                @default(0)  // 전체 항목 표시 순서 (섹션 무관)
+  referenceImage String?            // 작업자용 참조 사진 파일명 (storage/references/) — 클릭 시 확대
+  note           String?            // 항목별 주의사항 (체크시트 폼에 표시)
   template       ChecksheetTemplate @relation(fields: [templateId], references: [id])
   specRanges     SpecRange[]
   values         CheckValue[]
@@ -137,12 +144,16 @@ model Submission {
   templateVersion String?            // 스냅샷
   partNumberId    Int?
   date            DateTime
+  shift           Int?               // 제출한 시프트 번호 (1|2|3) — worker 이름 없어도 기록
   shift1LE        String?
   shift2LE        String?
   shift1QC        String?
   shift2QC        String?
   shift1SV        String?
   shift2SV        String?
+  shift3LE        String?
+  shift3QC        String?
+  shift3SV        String?
   partNumberBuild String?
   hasOutOfRange   Boolean            @default(false)
   createdAt       DateTime           @default(now())
@@ -215,6 +226,18 @@ model AuditLog {
   @@index([entityType, entityId])
 }
 
+// 시프트 설정 — 어드민에서 추가/수정/삭제
+model ShiftConfig {
+  id          Int     @id @default(autoincrement())
+  name        String  // "1st Shift", "2nd Shift", "3rd Shift" ...
+  order       Int     @unique  // 시프트 번호 (CheckValue.shift 값과 동일)
+  startHour   Int     @default(0)  // 시작 시 (0-23)
+  startMinute Int     @default(0)  // 시작 분 (0-59)
+  endHour     Int     // 마감 시 (0-23)
+  endMinute   Int     // 마감 분 (0-59)
+  isActive    Boolean @default(true)
+}
+
 // ── Trend Chart 설정 (코드 하드코딩 대신 관리자에서 지정) ──
 
 // 어떤 체크시트를 Trend Chart 에 포함할지
@@ -243,4 +266,28 @@ model CheckValue {
   correctedText String?    // 조치 후 재측정값
   submission    Submission @relation(fields: [submissionId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   item          CheckItem  @relation(fields: [itemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+// 그리스 컨테이너 교체 이력 — submission과 독립. (라인·모델·PN·날짜) 단위로 시각순 누적
+model GreaseLog {
+  id             Int         @id @default(autoincrement())
+  lineId         Int
+  modelId        Int?
+  partNumberId   Int?
+  companyName    String?     // 스냅샷
+  lineName       String?     // 스냅샷
+  modelName      String?     // 스냅샷
+  partNumberCode String?     // 스냅샷
+  date           DateTime    // 작업 날짜 (자정 기준)
+  side           String      // "outboard" | "inboard"
+  batchCode      String
+  operator       String?     // 교체한 작업자
+  source         String      @default("manual") // "manual"(Grease Change 화면) | "machine"(머신체크 제출 시 자동 start 기록)
+  changedAt      DateTime    @default(now()) // 교체 입력 시각 (자동)
+  createdAt      DateTime    @default(now())
+  line           Line        @relation(fields: [lineId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  model          Model?      @relation(fields: [modelId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  partNumber     PartNumber? @relation(fields: [partNumberId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([date, partNumberId])
 }

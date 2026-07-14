@@ -100,20 +100,19 @@ export default async function HomePage() {
           ))}
         </div>
 
-        {/* History + Sign out */}
-        <div className="fade-up fade-up-2" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", gap: "16px" }}>
+        <div className="fade-up fade-up-2" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "18px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
             <Link href="/dashboard" style={{ fontSize: "15px", color: "var(--accent)", textDecoration: "none", letterSpacing: "-0.2px" }}>
               Dashboard
-            </Link>
-            <Link href="/production" style={{ fontSize: "15px", color: "var(--accent)", textDecoration: "none", letterSpacing: "-0.2px" }}>
-              Charts
             </Link>
             <Link href="/history" style={{ fontSize: "15px", color: "var(--accent)", textDecoration: "none", letterSpacing: "-0.2px" }}>
               History
             </Link>
+            <Link href="/grease" style={{ fontSize: "15px", color: "var(--accent)", textDecoration: "none", letterSpacing: "-0.2px" }}>
+              Grease
+            </Link>
           </div>
-          <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", marginLeft: "auto" }}>
             <Link href="/device" style={{ fontSize: "15px", color: "var(--text-3)", textDecoration: "none", letterSpacing: "-0.2px" }}>
               Device
             </Link>
